@@ -20,7 +20,7 @@ services:
     networks: [nexus-runtime]
 
   traefik:
-    image: traefik:v3.5
+    image: traefik:v3.7.13
     command:
       - --configFile=/etc/traefik/traefik.yml
       - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}
