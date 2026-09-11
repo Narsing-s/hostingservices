@@ -22,12 +22,13 @@ createDeploymentWorker(async (job) => {
   const { deploymentId } = job.data;
   await report(deploymentId, job.data.operation === 'rollback' ? 'rolling_back' : 'starting');
   try {
+    const runtimeSpec = { name: job.data.name, image: job.data.image, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, command: job.data.command, healthPath: job.data.healthPath, domain: job.data.domain };
     let runtime;
     if (job.data.operation === 'rollback') {
       if (!job.data.previousImage) throw new Error('previousImage is required for rollback');
-      runtime = await rollbackRuntime({ name: job.data.name, image: job.data.image, previousImage: job.data.previousImage, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, healthPath: job.data.healthPath, domain: job.data.domain });
+      runtime = await rollbackRuntime({ ...runtimeSpec, previousImage: job.data.previousImage });
     } else {
-      runtime = await deployRuntime({ name: job.data.name, image: job.data.image, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, healthPath: job.data.healthPath, domain: job.data.domain });
+      runtime = await deployRuntime(runtimeSpec);
     }
     await report(deploymentId, 'ready', runtime);
   } catch (error) {
