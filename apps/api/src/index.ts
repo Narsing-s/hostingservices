@@ -1,13 +1,16 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
+import { createHmac, timingSafeEqual, randomUUID, randomBytes } from 'node:crypto';
+import { resolveTxt } from 'node:dns/promises';
 import { z } from 'zod';
-import { createDeployment, createProject, findProjectByRepo, initDb, listDeployments, listProjects, projectExists, updateDeployment } from './db.js';
+import { createDeployment, createProject, findProjectByRepo, getDomain, getVerifiedDomain, initDb, listDeployments, listDomains, listProjects, markDomainVerified, projectExists, createDomain, updateDeployment } from './db.js';
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
 const ENGINE_URL = process.env.ENGINE_URL ?? 'http://localhost:4100';
 const ENGINE_CALLBACK_SECRET = process.env.ENGINE_CALLBACK_SECRET ?? '';
+const DOMAIN_VERIFICATION_PREFIX = process.env.DOMAIN_VERIFICATION_PREFIX ?? '_nexus-verify';
+const domainPattern = /^(?=.{1,253}$)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/;
 
 app.get('/health', async () => ({ ok: true, service: 'nexus-api', engine: ENGINE_URL, timestamp: new Date().toISOString() }));
 app.get('/api/v1/projects', async () => listProjects());
@@ -29,6 +32,32 @@ app.get('/api/v1/deployments/:id/logs', async (req, reply) => {
   return reply.send({ deploymentId: id, status: deployment.status, logs: result.logs ?? '' });
 });
 
+app.get('/api/v1/domains', async (req) => {
+  const projectId = (req.query as { projectId?: string }).projectId;
+  return listDomains(projectId);
+});
+app.post('/api/v1/domains', async (req, reply) => {
+  const body = z.object({ projectId: z.string(), domain: z.string().regex(domainPattern).transform((value) => value.toLowerCase().replace(/\.$/, '')) }).parse(req.body);
+  if (!(await projectExists(body.projectId))) return reply.code(404).send({ error: 'Project not found' });
+  const verificationToken = randomBytes(24).toString('hex');
+  const domain = await createDomain({ id: randomUUID(), projectId: body.projectId, domain: body.domain, verificationToken, createdAt: new Date().toISOString() });
+  return reply.code(201).send({ id: domain.id, projectId: domain.projectId, domain: domain.domain, status: 'pending', verification: { type: 'TXT', name: `${DOMAIN_VERIFICATION_PREFIX}.${domain.domain}`, value: verificationToken } });
+});
+app.post('/api/v1/domains/:id/verify', async (req, reply) => {
+  const id = (req.params as { id:string }).id;
+  const domain = await getDomain(id);
+  if (!domain) return reply.code(404).send({ error: 'Domain not found' });
+  try {
+    const records = await resolveTxt(`${DOMAIN_VERIFICATION_PREFIX}.${domain.domain}`);
+    const values = records.flat();
+    if (!values.includes(domain.verificationToken)) return reply.code(409).send({ error: 'Verification record not found', expected: { type: 'TXT', name: `${DOMAIN_VERIFICATION_PREFIX}.${domain.domain}`, value: domain.verificationToken } });
+  } catch {
+    return reply.code(409).send({ error: 'Verification record not found', expected: { type: 'TXT', name: `${DOMAIN_VERIFICATION_PREFIX}.${domain.domain}`, value: domain.verificationToken } });
+  }
+  await markDomainVerified(id);
+  return reply.send({ id, domain: domain.domain, status: 'verified' });
+});
+
 app.post('/api/v1/deployments/:id/status', async (req, reply) => {
   if (ENGINE_CALLBACK_SECRET && req.headers['x-engine-secret']?.toString() !== ENGINE_CALLBACK_SECRET) return reply.code(401).send({ error: 'Unauthorized engine callback' });
   const id = (req.params as { id: string }).id;
@@ -41,10 +70,11 @@ app.post('/api/v1/deployments/:id/status', async (req, reply) => {
 
 app.post('/api/v1/deployments', async (req, reply) => {
   const body = z.object({
-    projectId: z.string(), repo: z.string().url().optional(), ref: z.string().min(1).default('main'), image: z.string().min(1).optional(), hostPort: z.number().int().min(1).max(65535).optional(), containerPort: z.number().int().min(1).max(65535).default(80), healthPath: z.string().startsWith('/').max(200).optional(), domain: z.string().regex(/^(?=.{1,253}$)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/).optional(), env: z.record(z.string()).optional(),
+    projectId: z.string(), repo: z.string().url().optional(), ref: z.string().min(1).default('main'), image: z.string().min(1).optional(), hostPort: z.number().int().min(1).max(65535).optional(), containerPort: z.number().int().min(1).max(65535).default(80), healthPath: z.string().startsWith('/').max(200).optional(), domain: z.string().regex(domainPattern).transform((value) => value.toLowerCase().replace(/\.$/, '')).optional(), env: z.record(z.string()).optional(),
   }).parse(req.body);
   if (!(await projectExists(body.projectId))) return reply.code(404).send({ error: 'Project not found' });
   if (!body.repo && !body.image) return reply.code(400).send({ error: 'repo or image is required' });
+  if (body.domain && !(await getVerifiedDomain(body.projectId, body.domain))) return reply.code(409).send({ error: 'Domain is not verified for this project', domain: body.domain });
   const id = randomUUID(); const image = body.repo ? (body.image ?? `nexus/build:${id.slice(0, 12)}`) : body.image!;
   const deployment = { id, projectId: body.projectId, repo: body.repo, image, status: 'queued', createdAt: new Date().toISOString() };
   await createDeployment(deployment);
