@@ -7,29 +7,21 @@ const callbackSecret = process.env.ENGINE_CALLBACK_SECRET ?? '';
 async function report(deploymentId: string | undefined, status: 'starting' | 'ready' | 'failed' | 'rolling_back', runtime?: unknown) {
   if (!deploymentId) return;
   try {
-    const response = await fetch(`${callbackUrl}/api/v1/deployments/${encodeURIComponent(deploymentId)}/status`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...(callbackSecret ? { 'x-engine-secret': callbackSecret } : {}) },
-      body: JSON.stringify({ status, runtime }),
-    });
+    const response = await fetch(`${callbackUrl}/api/v1/deployments/${encodeURIComponent(deploymentId)}/status`, { method: 'POST', headers: { 'content-type': 'application/json', ...(callbackSecret ? { 'x-engine-secret': callbackSecret } : {}) }, body: JSON.stringify({ status, runtime }) });
     if (!response.ok) console.error(`[deployment] lifecycle callback failed: ${response.status}`);
-  } catch (error) {
-    console.error(`[deployment] lifecycle callback error: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  } catch (error) { console.error(`[deployment] lifecycle callback error: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
 createDeploymentWorker(async (job) => {
   const { deploymentId } = job.data;
   await report(deploymentId, job.data.operation === 'rollback' ? 'rolling_back' : 'starting');
   try {
-    const runtimeSpec = { name: job.data.name, image: job.data.image, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, command: job.data.command, healthPath: job.data.healthPath, domain: job.data.domain };
+    const runtimeSpec = { name: job.data.name, image: job.data.image, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, command: job.data.command, healthMode: job.data.healthMode, public: job.data.public, healthPath: job.data.healthPath, domain: job.data.domain };
     let runtime;
     if (job.data.operation === 'rollback') {
       if (!job.data.previousImage) throw new Error('previousImage is required for rollback');
       runtime = await rollbackRuntime({ ...runtimeSpec, previousImage: job.data.previousImage });
-    } else {
-      runtime = await deployRuntime(runtimeSpec);
-    }
+    } else runtime = await deployRuntime(runtimeSpec);
     await report(deploymentId, 'ready', runtime);
   } catch (error) {
     const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
@@ -37,5 +29,4 @@ createDeploymentWorker(async (job) => {
     throw error;
   }
 });
-
 console.log('Nexus deployment worker started');
