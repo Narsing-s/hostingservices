@@ -1,0 +1,8 @@
+{
+  "name": "@nexus/cli",
+  "version": "0.4.0",
+  "private": false,
+  "description": "Nexus Hosting CLI for repository builds and monorepo service discovery",
+  "bin": { "nexus": "bin/nexus.js" },
+  "engines": { "node": ">=20" }
+}
