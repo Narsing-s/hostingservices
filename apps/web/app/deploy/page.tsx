@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import RollbackButton from './rollback-button';
 
 const API = process.env.NEXT_PUBLIC_NEXUS_API_URL ?? 'http://localhost:4000';
 
@@ -78,7 +79,7 @@ export default function DeployPage() {
     <div className="formGrid"><label>Container port <input type="number" value={containerPort} onChange={e => setContainerPort(e.target.value)} /></label><label>Health path <input value={healthPath} onChange={e => setHealthPath(e.target.value)} disabled={serviceType !== 'web'} /></label></div>
     <button className="deployAction" disabled={busy || !projectId || !repo} onClick={deploy}>{busy ? 'Deploying…' : 'Deploy selected service'}</button>
     {message && <div className="modalNote" style={{ marginTop: 14 }}>{message}</div>}
-    {deployment && <div className="capabilities" style={{ marginTop: 14 }}><b>{state.label}</b><span>{state.detail}</span><span>Deployment: {deployment.id}</span><span>Lifecycle: Queued → Building → Starting → Running / Failed</span></div>}
+    {deployment && <div className="capabilities" style={{ marginTop: 14 }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}><div><b>{state.label}</b><span>{state.detail}</span></div><RollbackButton deploymentId={deployment.id} disabled={deployment.status !== 'ready'} onComplete={() => { setDeployment({ ...deployment, status: 'rolling_back' }); setMessage('Rollback queued. Nexus is restoring the previous healthy deployment.'); }} /></div><span>Deployment: {deployment.id}</span><span>Lifecycle: Queued → Building → Starting → Running / Failed</span></div>}
     {deployment && <div className="modalNote" style={{ marginTop: 14 }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}><b>Deployment logs</b><button className="mini" onClick={() => setShowLogs(v => !v)}>{showLogs ? 'Hide logs' : 'Show logs'}</button></div>{showLogs && <pre style={{ marginTop: 10, maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 12 }}>{combinedLogs || 'Waiting for deployment logs…'}</pre>}</div>}
   </section></main>;
 }
