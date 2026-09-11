@@ -1,0 +1,7 @@
+{
+  "name": "nexus-api",
+  "private": true,
+  "scripts": {"dev":"tsx src/index.ts","build":"tsc","start":"node dist/index.js"},
+  "dependencies": {"@fastify/cors":"latest","@fastify/swagger":"latest","fastify":"latest","zod":"latest"},
+  "devDependencies": {"@types/node":"latest","tsx":"latest","typescript":"latest"}
+}
