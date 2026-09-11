@@ -6,7 +6,7 @@ import { enqueueDeployment, queueStats } from './redis-queue.js';
 const docker = process.platform === 'win32' ? new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' }) : new Docker({ socketPath: process.env.DOCKER_SOCKET ?? '/var/run/docker.sock' });
 const port = Number(process.env.PORT ?? 4100);
 
-type DeployBody = { name: string; image: string; deploymentId?: string; containerPort?: number; hostPort?: number; env?: Record<string, string>; previousImage?: string; healthPath?: string };
+type DeployBody = { name: string; image: string; deploymentId?: string; containerPort?: number; hostPort?: number; env?: Record<string, string>; command?: string[]; previousImage?: string; healthPath?: string; domain?: string };
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -29,6 +29,9 @@ async function main(req: http.IncomingMessage, res: http.ServerResponse) {
       const rollback = req.url.endsWith('/rollback');
       if (!body.name || (!rollback && !body.image) || (rollback && !body.previousImage)) {
         send(res, 400, { error: rollback ? 'name and previousImage are required' : 'name and image are required' }); return;
+      }
+      if (body.command && (!Array.isArray(body.command) || body.command.some((part) => typeof part !== 'string' || part.length > 2000))) {
+        send(res, 400, { error: 'command must be an array of strings' }); return;
       }
       const idempotencyKey = req.headers['idempotency-key']?.toString();
       const job = await enqueueDeployment({ operation: rollback ? 'rollback' : 'deploy', ...body }, idempotencyKey);
