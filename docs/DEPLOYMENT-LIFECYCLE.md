@@ -1,24 +1,27 @@
 # Nexus deployment lifecycle
 
-A deployment now follows a bounded asynchronous runtime flow:
+Nexus uses a bounded asynchronous runtime flow:
 
-1. API validates the project and deployment request.
+1. API validates the deployment request.
 2. Git source is built into an immutable image tag.
 3. The engine queues the runtime operation instead of blocking the HTTP request.
-4. The runtime replaces the previous container only after the new deployment is ready to start.
-5. Docker health checks are observed when configured.
-6. Failed starts are removed rather than reported as healthy.
-7. The previous image can be supplied to the rollback endpoint for recovery.
-8. Runtime logs remain available through the engine log endpoint.
+4. A candidate container is started first.
+5. The candidate must pass a Docker `HEALTHCHECK` or an explicit HTTP `healthPath` before it can replace the active runtime.
+6. Failed candidates are removed and the active runtime is not intentionally stopped during candidate validation.
+7. For fixed host ports without a reverse proxy, the final handoff has a short restart window. True zero-downtime switching requires a router/proxy that can atomically move traffic from the old container to the healthy candidate.
+8. The previous image can be supplied to the rollback endpoint for recovery.
+9. Runtime logs remain available through the engine log endpoint.
 
-## Important production rule
+## Health policy
 
-A deployment must never be marked healthy merely because `docker start` returned successfully. Images should define a Docker `HEALTHCHECK`; otherwise Nexus can only report that the container is running, not that the application is healthy.
+By default, Nexus requires an actual health signal. A container without a Docker `HEALTHCHECK` must provide `healthPath` in the runtime request, for example `/health`.
 
-## Current limitation
+For local development only, `REQUIRE_HEALTHCHECK=false` can allow a running container without a configured health signal. This should not be used as a production health policy.
 
-The queue is an in-process bounded queue. It protects a single engine instance from unlimited concurrent deployments. Production HA requires Redis/BullMQ or another durable queue so jobs survive process restarts and can be distributed across engine workers.
+## Current queue limitation
+
+The queue is an in-process bounded queue. It protects a single engine instance from unlimited concurrent deployments, but jobs are lost if that process exits. Production HA requires Redis/BullMQ or another durable queue so jobs survive restarts and can be distributed across workers.
 
 ## Rollback
 
-`POST /api/v1/runtime/rollback` accepts the runtime specification plus `previousImage`. The rollback uses the same deployment and health-check path as a normal deployment.
+`POST /api/v1/runtime/rollback` accepts the runtime specification plus `previousImage`. Rollback uses the same candidate-and-health path as a normal deployment rather than blindly replacing a running container.
