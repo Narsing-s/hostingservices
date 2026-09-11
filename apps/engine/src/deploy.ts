@@ -35,7 +35,7 @@ export async function deployRuntime(spec: RuntimeSpec) {
   let candidate: Docker.Container | undefined;
   try {
     const previous = await findActiveContainer(docker, spec.name);
-    if (previous) { const info = await previous.inspect(); previousName = info.Name?.replace(/^\//, '') || previous.id; previousId = info.Id; }
+    if (previous) { previousName = previous.Names?.[0]?.replace(/^\//, '') || previous.Id; previousId = previous.Id; }
     // Public proxy deployments receive a random ephemeral host port for health probing.
     // Traefik still routes directly over the Docker network, so this port is never public-facing.
     const candidateHostPort = proxyEnabled ? 0 : (previousName ? undefined : (publicService ? requestedHostPort : undefined));
