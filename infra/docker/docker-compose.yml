@@ -9,12 +9,16 @@ services:
       - '5432:5432'
     volumes:
       - nexus-postgres:/var/lib/postgresql/data
+    networks: [nexus-runtime]
+
   redis:
     image: redis:7-alpine
     ports:
       - '6379:6379'
     volumes:
       - nexus-redis:/data
+    networks: [nexus-runtime]
+
   traefik:
     image: traefik:v3.5
     command:
@@ -24,6 +28,14 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./dynamic:/etc/traefik/dynamic:ro
+    networks: [nexus-runtime]
+
+networks:
+  nexus-runtime:
+    name: nexus-runtime
+    driver: bridge
+
 volumes:
   nexus-postgres:
   nexus-redis:
