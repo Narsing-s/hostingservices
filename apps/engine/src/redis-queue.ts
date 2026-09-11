@@ -5,21 +5,17 @@ export type DeploymentJob = {
   name: string;
   image: string;
   previousImage?: string;
+  deploymentId?: string;
   containerPort?: number;
   hostPort?: number;
   env?: Record<string, string>;
+  healthPath?: string;
 };
 
 function connection() {
   const url = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
   const parsed = new URL(url);
-  return {
-    host: parsed.hostname,
-    port: Number(parsed.port || 6379),
-    username: parsed.username || undefined,
-    password: parsed.password || undefined,
-    maxRetriesPerRequest: null,
-  };
+  return { host: parsed.hostname, port: Number(parsed.port || 6379), username: parsed.username || undefined, password: parsed.password || undefined, maxRetriesPerRequest: null };
 }
 
 export const deploymentQueue = new Queue<DeploymentJob>('nexus-deployments', {
@@ -32,9 +28,7 @@ export const deploymentQueue = new Queue<DeploymentJob>('nexus-deployments', {
   },
 });
 
-export const deploymentEvents = new QueueEvents('nexus-deployments', {
-  connection: connection(),
-});
+export const deploymentEvents = new QueueEvents('nexus-deployments', { connection: connection() });
 
 export async function enqueueDeployment(job: DeploymentJob, idempotencyKey?: string) {
   const jobId = idempotencyKey?.replace(/[^a-zA-Z0-9:_-]/g, '_').slice(0, 200);
@@ -44,8 +38,7 @@ export async function enqueueDeployment(job: DeploymentJob, idempotencyKey?: str
 }
 
 export async function queueStats() {
-  const counts = await deploymentQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed');
-  return counts;
+  return deploymentQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed');
 }
 
 export function createDeploymentWorker(handler: (job: Job<DeploymentJob>) => Promise<void>) {
