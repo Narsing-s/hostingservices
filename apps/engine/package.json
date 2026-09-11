@@ -1,1 +1,24 @@
-{"name":"@nexus/engine","private":true,"scripts":{"dev":"tsx watch src/index.ts","dev:worker":"tsx watch src/worker.ts","build":"tsc -p tsconfig.json","start":"node dist/index.js","start:worker":"node dist/worker.js"},"dependencies":{"@fastify/cors":"latest","bullmq":"latest","fastify":"latest","dockerode":"latest","ioredis":"latest"},"devDependencies":{"@types/dockerode":"latest","tsx":"latest","typescript":"latest"}}
+{
+  "name": "@nexus/engine",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "dev:worker": "tsx watch src/worker.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "start:worker": "node dist/worker.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "latest",
+    "bullmq": "latest",
+    "fastify": "latest",
+    "dockerode": "latest",
+    "ioredis": "latest"
+  },
+  "devDependencies": {
+    "@types/dockerode": "latest",
+    "@types/node": "latest",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}
