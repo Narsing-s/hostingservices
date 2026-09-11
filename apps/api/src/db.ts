@@ -1,4 +1,5 @@
 import pg from 'pg';
+import crypto from 'node:crypto';
 
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? 'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus' });
@@ -20,28 +21,10 @@ export async function initDb() {
 export async function createUser(user:{id:string;email?:string|null;name:string;avatarUrl?:string|null;passwordHash?:string|null}) { const now=new Date().toISOString(); await pool.query('INSERT INTO users (id,email,name,avatar_url,password_hash,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6)',[user.id,user.email??null,user.name,user.avatarUrl??null,user.passwordHash??null,now]); return getUserById(user.id); }
 export async function getUserById(id:string) { const {rows}=await pool.query('SELECT id,email,name,avatar_url AS "avatarUrl",created_at AS "createdAt" FROM users WHERE id=$1',[id]); return rows[0]; }
 export async function getUserByEmail(email:string) { const {rows}=await pool.query('SELECT id,email,name,avatar_url AS "avatarUrl",password_hash AS "passwordHash",created_at AS "createdAt" FROM users WHERE lower(email)=lower($1) LIMIT 1',[email]); return rows[0]; }
-export async function upsertOAuthAccount(input:{provider:string;providerAccountId:string;email?:string|null;name:string;avatarUrl?:string|null;accessToken?:string|null}) {
-  const existing = await pool.query('SELECT user_id AS "userId" FROM oauth_accounts WHERE provider=$1 AND provider_account_id=$2',[input.provider,input.providerAccountId]);
-  let userId:string;
-  if (existing.rows[0]) userId=existing.rows[0].userId;
-  else {
-    const byEmail=input.email?await getUserByEmail(input.email):undefined;
-    if (byEmail) userId=byEmail.id;
-    else userId=randomUuid();
-    if (!byEmail) await createUser({id:userId,email:input.email,name:input.name,avatarUrl:input.avatarUrl});
-    const now=new Date().toISOString();
-    await pool.query('INSERT INTO oauth_accounts (id,user_id,provider,provider_account_id,access_token,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6)',[randomUuid(),userId,input.provider,input.providerAccountId,input.accessToken??null,now]);
-    return getUserById(userId);
-  }
-  await pool.query('UPDATE oauth_accounts SET access_token=$3,updated_at=NOW() WHERE provider=$1 AND provider_account_id=$2',[input.provider,input.providerAccountId,input.accessToken??null]);
-  await pool.query('UPDATE users SET name=$2,avatar_url=$3,updated_at=NOW() WHERE id=$1',[userId,input.name,input.avatarUrl??null]);
-  return getUserById(userId);
-}
-function randomUuid(){return crypto.randomUUID();}
-export async function createSession(userId:string,tokenHash:string,expiresAt:string){const id=randomUuid();await pool.query('INSERT INTO sessions (id,user_id,token_hash,expires_at,created_at) VALUES ($1,$2,$3,$4,NOW())',[id,userId,tokenHash,expiresAt]);return id;}
+export async function upsertOAuthAccount(input:{provider:string;providerAccountId:string;email?:string|null;name:string;avatarUrl?:string|null;accessToken?:string|null}) { const existing = await pool.query('SELECT user_id AS "userId" FROM oauth_accounts WHERE provider=$1 AND provider_account_id=$2',[input.provider,input.providerAccountId]); let userId:string; if (existing.rows[0]) userId=existing.rows[0].userId; else { const byEmail=input.email?await getUserByEmail(input.email):undefined; if (byEmail) userId=byEmail.id; else userId=crypto.randomUUID(); if (!byEmail) await createUser({id:userId,email:input.email,name:input.name,avatarUrl:input.avatarUrl}); const now=new Date().toISOString(); await pool.query('INSERT INTO oauth_accounts (id,user_id,provider,provider_account_id,access_token,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$6)',[crypto.randomUUID(),userId,input.provider,input.providerAccountId,input.accessToken??null,now]); return getUserById(userId); } await pool.query('UPDATE oauth_accounts SET access_token=$3,updated_at=NOW() WHERE provider=$1 AND provider_account_id=$2',[input.provider,input.providerAccountId,input.accessToken??null]); await pool.query('UPDATE users SET name=$2,avatar_url=$3,updated_at=NOW() WHERE id=$1',[userId,input.name,input.avatarUrl??null]); return getUserById(userId); }
+export async function createSession(userId:string,tokenHash:string,expiresAt:string){const id=crypto.randomUUID();await pool.query('INSERT INTO sessions (id,user_id,token_hash,expires_at,created_at) VALUES ($1,$2,$3,$4,NOW())',[id,userId,tokenHash,expiresAt]);return id;}
 export async function getUserBySession(tokenHash:string){const {rows}=await pool.query('SELECT u.id,u.email,u.name,u.avatar_url AS "avatarUrl",u.created_at AS "createdAt" FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW() LIMIT 1',[tokenHash]);return rows[0];}
 export async function deleteSession(tokenHash:string){await pool.query('DELETE FROM sessions WHERE token_hash=$1',[tokenHash]);}
-
 export async function listProjects() { const { rows } = await pool.query('SELECT id, name, repo, created_at AS "createdAt" FROM projects ORDER BY created_at DESC'); return rows; }
 export async function createProject(project: { id:string; name:string; repo?:string; createdAt:string }) { await pool.query('INSERT INTO projects (id,name,repo,created_at) VALUES ($1,$2,$3,$4)', [project.id,project.name,project.repo??null,project.createdAt]); return project; }
 export async function findProjectByRepo(repo:string) { const { rows } = await pool.query('SELECT id,name,repo,created_at AS "createdAt" FROM projects WHERE repo=$1 LIMIT 1',[repo]); return rows[0] as {id:string;name:string;repo?:string;createdAt:string}|undefined; }
