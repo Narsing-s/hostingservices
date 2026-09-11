@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import { createHmac, timingSafeEqual, randomUUID, randomBytes } from 'node:crypto';
 import { resolveTxt } from 'node:dns/promises';
 import { z } from 'zod';
-import { createDeployment, createProject, findProjectByRepo, getDomain, getVerifiedDomain, initDb, listDeployments, listDomains, markDomainVerified, projectExists, createDomain, updateDeployment } from './db.js';
+import { createDeployment, createProject, findProjectByRepo, getDomain, getVerifiedDomain, initDb, listDeployments, listDomains, listProjects, markDomainVerified, projectExists, createDomain, updateDeployment } from './db.js';
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
