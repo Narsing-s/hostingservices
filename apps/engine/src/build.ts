@@ -1,11 +1,33 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile, readFile, access, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const exec = promisify(execFile);
-export type BuildRequest = { repo: string; ref?: string; image: string };
+export type BuildRequest = { repo: string; ref?: string; image: string; deploymentId?: string };
+const buildLogs = new Map<string, string>();
+const maxLogSize = 2_000_000;
+
+function appendLog(deploymentId: string | undefined, text: string) {
+  if (!deploymentId) return;
+  const current = buildLogs.get(deploymentId) ?? '';
+  buildLogs.set(deploymentId, (current + text).slice(-maxLogSize));
+}
+export function getBuildLogs(deploymentId: string) { return buildLogs.get(deploymentId) ?? ''; }
+export function clearBuildLogs(deploymentId: string) { buildLogs.delete(deploymentId); }
+
+async function run(command: string, args: string[], options: { timeout: number; deploymentId?: string }) {
+  return await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let settled = false;
+    const finish = (error?: Error) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(); };
+    const timer = setTimeout(() => { child.kill(); finish(new Error(`${command} timed out after ${options.timeout}ms`)); }, options.timeout);
+    child.stdout.on('data', (chunk) => appendLog(options.deploymentId, chunk.toString()));
+    child.stderr.on('data', (chunk) => appendLog(options.deploymentId, chunk.toString()));
+    child.on('error', (error) => finish(error));
+    child.on('close', (code) => code === 0 ? finish() : finish(new Error(`${command} exited with code ${code}`)));
+  });
+}
+
 async function exists(file: string) { try { await access(file); return true; } catch { return false; } }
 async function packageJson(dir: string): Promise<any | undefined> { try { return JSON.parse(await readFile(path.join(dir, 'package.json'), 'utf8')); } catch { return undefined; } }
 
@@ -65,11 +87,20 @@ async function detectDockerfile(dir: string) {
 
 export async function buildFromGit(request: BuildRequest) {
   const dir = await mkdtemp(path.join(tmpdir(), 'nexus-build-'));
+  clearBuildLogs(request.deploymentId ?? '');
+  appendLog(request.deploymentId, `$ nexus build ${request.repo} @ ${request.ref ?? 'default'}\n`);
   try {
     const cloneArgs = ['clone', '--depth', '1']; if (request.ref) cloneArgs.push('--branch', request.ref); cloneArgs.push(request.repo, dir);
-    await exec('git', cloneArgs, { timeout: 120000 });
+    appendLog(request.deploymentId, '$ git clone ' + request.repo + '\n');
+    await run('git', cloneArgs, { timeout: 120000, deploymentId: request.deploymentId });
+    appendLog(request.deploymentId, '\n✓ Source downloaded\n');
     const detected = await detectDockerfile(dir);
-    await exec('docker', ['build', '--pull', '-t', request.image, dir], { timeout: 900000, maxBuffer: 10 * 1024 * 1024 });
+    appendLog(request.deploymentId, `✓ Runtime detected: ${detected.kind}${detected.generated ? ' (Dockerfile generated)' : ''}\n\n$ docker build --pull -t ${request.image} .\n`);
+    await run('docker', ['build', '--pull', '-t', request.image, dir], { timeout: 900000, deploymentId: request.deploymentId });
+    appendLog(request.deploymentId, `\n✓ Build completed: ${request.image}\n`);
     return { image: request.image, repository: request.repo, ref: request.ref ?? 'default', status: 'built', runtime: detected.kind, dockerfileGenerated: detected.generated };
+  } catch (error) {
+    appendLog(request.deploymentId, `\n✗ BUILD FAILED: ${error instanceof Error ? error.message : String(error)}\n`);
+    throw error;
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
