@@ -1,7 +1,13 @@
 import pg from 'pg';
 
 const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? 'postgres://nexus:nexus_dev_password@postgres:5432/nexus' });
+// Local development runs the API directly on the host, while Postgres runs in Docker.
+// Use localhost by default so Windows/macOS/Linux host processes can reach the published port.
+// Production should always provide DATABASE_URL explicitly.
+const pool = new Pool({
+  connectionString:
+    process.env.DATABASE_URL ?? 'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus',
+});
 
 export async function initDb() {
   await pool.query(`
