@@ -12,7 +12,20 @@ type Detection = {
   dockerfileGenerated?: boolean;
 };
 
-type Deployment = { id: string; status: string; service?: string; serviceType?: string };
+type Deployment = { id: string; status: string; service?: string; serviceType?: string; repo?: string };
+
+const lifecycle: Record<string, { label: string; detail: string }> = {
+  queued: { label: 'Queued', detail: 'Waiting for a build worker' },
+  building: { label: 'Building', detail: 'Building source into a deployable image' },
+  starting: { label: 'Starting', detail: 'Starting the runtime and checking health' },
+  ready: { label: 'Running', detail: 'Runtime is healthy and serving traffic' },
+  failed: { label: 'Failed', detail: 'Deployment or health check failed' },
+  rolling_back: { label: 'Rolling back', detail: 'Restoring the previous healthy version' }
+};
+
+function stateFor(status?: string) {
+  return lifecycle[status ?? ''] ?? { label: status ? status.replace(/_/g, ' ') : 'Unknown', detail: 'Deployment state reported by Nexus' };
+}
 
 export default function DeployPage() {
   const [projectId, setProjectId] = useState('');
@@ -33,8 +46,25 @@ export default function DeployPage() {
     fetch(`${API}/api/v1/projects`, { credentials: 'include' })
       .then(r => r.ok ? r.json() : [])
       .then(v => { setProjects(v); if (v[0]) { setProjectId(v[0].id); setRepo(v[0].repo ?? ''); } })
-      .catch(() => undefined);
+      .catch(() => setMessage('API is not reachable. Start the Nexus API on port 4000.'));
   }, []);
+
+  useEffect(() => {
+    if (!deployment || ['ready', 'failed'].includes(deployment.status)) return;
+    const timer = setInterval(async () => {
+      try {
+        const r = await fetch(`${API}/api/v1/deployments`, { credentials: 'include' });
+        if (!r.ok) return;
+        const deployments: Deployment[] = await r.json();
+        const current = deployments.find(item => item.id === deployment.id);
+        if (!current) return;
+        setDeployment(current);
+        const state = stateFor(current.status);
+        setMessage(`${state.label}: ${state.detail}.`);
+      } catch { /* keep the last known deployment state */ }
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [deployment?.id, deployment?.status]);
 
   async function detect() {
     if (!repo) return setMessage('Enter a Git repository URL first.');
@@ -71,10 +101,12 @@ export default function DeployPage() {
       const v = await r.json();
       if (!r.ok) throw new Error(v.detail || v.error || 'Deployment failed');
       setDeployment(v);
-      setMessage(`Deployment ${v.id.slice(0, 8)} queued. Nexus will show Running only after health checks pass.`);
+      setMessage(`Queued: ${v.id.slice(0, 8)}. Nexus will update this screen as the deployment progresses.`);
     } catch (e) { setMessage(e instanceof Error ? e.message : 'Deployment failed'); }
     finally { setBusy(false); }
   }
+
+  const state = stateFor(deployment?.status);
 
   return (
     <main className="authPage" style={{ display: 'block', padding: 40 }}>
@@ -116,7 +148,12 @@ export default function DeployPage() {
         </div>
         <button className="deployAction" disabled={busy || !projectId || !repo} onClick={deploy}>{busy ? 'Deploying…' : 'Deploy selected service'}</button>
         {message && <div className="modalNote" style={{ marginTop: 14 }}>{message}</div>}
-        {deployment && <div className="capabilities" style={{ marginTop: 14 }}><b>Deployment accepted</b><span>{deployment.id}</span><span>Lifecycle: Queued → Building → Starting → Running / Failed</span></div>}
+        {deployment && <div className="capabilities" style={{ marginTop: 14 }}>
+          <b>{state.label}</b>
+          <span>{state.detail}</span>
+          <span>Deployment: {deployment.id}</span>
+          <span>Lifecycle: Queued → Building → Starting → Running / Failed</span>
+        </div>}
       </section>
     </main>
   );
