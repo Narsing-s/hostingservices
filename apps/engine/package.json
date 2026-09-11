@@ -1,0 +1,4 @@
+{
+  "name":"nexus-engine","private":true,"scripts":{"dev":"tsx src/index.ts","build":"tsc","start":"node dist/index.js"},
+  "dependencies":{"dockerode":"latest","tsx":"latest"},"devDependencies":{"@types/node":"latest","typescript":"latest","@types/dockerode":"latest"}
+}
