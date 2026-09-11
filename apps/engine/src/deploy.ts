@@ -11,11 +11,11 @@ function dockerClient() {
 }
 async function ensureNetwork(docker: Docker) { const name = process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime'; const existing = docker.getNetwork(name); try { await existing.inspect(); return existing; } catch { return docker.createNetwork({ Name: name, Driver: 'bridge' }); } }
 async function removeContainer(docker: Docker, name: string) { try { const container = docker.getContainer(name); await container.stop({ t: 10 }).catch(() => undefined); await container.remove({ force: true }).catch(() => undefined); } catch {} }
-async function createAndStart(docker: Docker, spec: RuntimeSpec, containerName: string, hostPort: number) {
+async function createAndStart(docker: Docker, spec: RuntimeSpec, containerName: string, hostPort?: number) {
   const port = spec.containerPort ?? 80;
   await ensureNetwork(docker);
   const networkName = process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime';
-  const bindings = hostPort > 0 ? { [`${port}/tcp`]: [{ HostPort: String(hostPort) }] } : undefined;
+  const bindings = hostPort !== undefined ? { [`${port}/tcp`]: [{ HostPort: String(hostPort) }] } : undefined;
   const container = await docker.createContainer({ name: containerName, Image: spec.image, Env: Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`), Cmd: spec.command, ExposedPorts: { [`${port}/tcp`]: {} }, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, ...(bindings ? { PortBindings: bindings } : {}) }, NetworkingConfig: { EndpointsConfig: { [networkName]: {} } }, Labels: { 'nexus.managed': 'true', 'nexus.runtime': spec.name, 'nexus.deployment-container': containerName, 'traefik.enable': 'false', 'nexus.public': String(spec.public !== false) } });
   await container.start();
   return container;
@@ -36,7 +36,9 @@ export async function deployRuntime(spec: RuntimeSpec) {
   try {
     const previous = await findActiveContainer(docker, spec.name);
     if (previous) { const info = await previous.inspect(); previousName = info.Name?.replace(/^\//, '') || previous.id; previousId = info.Id; }
-    const candidateHostPort = proxyEnabled ? 0 : (previousName ? 0 : (publicService ? requestedHostPort : 0));
+    // Public proxy deployments receive a random ephemeral host port for health probing.
+    // Traefik still routes directly over the Docker network, so this port is never public-facing.
+    const candidateHostPort = proxyEnabled ? 0 : (previousName ? undefined : (publicService ? requestedHostPort : undefined));
     candidate = await createAndStart(docker, spec, candidateName, candidateHostPort);
     const actualCandidatePort = await inspectHostPort(candidate, port);
     const healthUrl = spec.healthPath && actualCandidatePort ? `http://127.0.0.1:${actualCandidatePort}${spec.healthPath}` : undefined;
