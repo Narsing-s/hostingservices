@@ -10,6 +10,7 @@ export type DeploymentJob = {
   hostPort?: number;
   env?: Record<string, string>;
   healthPath?: string;
+  domain?: string;
 };
 
 function connection() {
@@ -37,9 +38,7 @@ export async function enqueueDeployment(job: DeploymentJob, idempotencyKey?: str
   return deploymentQueue.add(job.operation, job, jobId ? { jobId } : undefined);
 }
 
-export async function queueStats() {
-  return deploymentQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed');
-}
+export async function queueStats() { return deploymentQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'); }
 
 export function createDeploymentWorker(handler: (job: Job<DeploymentJob>) => Promise<void>) {
   const worker = new Worker<DeploymentJob>('nexus-deployments', handler, {
