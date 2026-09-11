@@ -47,7 +47,7 @@ async function detectDockerfile(dir: string) {
     await writeFile(path.join(dir, 'Dockerfile'), `FROM gradle:8-jdk21 AS build\nWORKDIR /src\nCOPY . .\nRUN gradle build -x test --no-daemon\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/build/libs/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-gradle' };
   }
   if (await exists(path.join(dir, 'Cargo.toml'))) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM rust:1.89-alpine AS build\nRUN apk add --no-cache musl-dev\nWORKDIR /src\nCOPY . .\nRUN cargo build --release\nFROM alpine:3.22\nWORKDIR /app\nCOPY --from=build /src/target/release/ /app/\nENV PORT=8080\nEXPOSE 8080\nCMD ["sh", "-c", "$${RUST_BINARY:-app}"]\n`); return { generated: true, kind: 'rust' };
+    await writeFile(path.join(dir, 'Dockerfile'), `FROM rust:1.89-alpine AS build\nRUN apk add --no-cache musl-dev\nWORKDIR /src\nCOPY . .\nRUN cargo build --release\nFROM alpine:3.22\nWORKDIR /app\nCOPY --from=build /src/target/release/ /app/\nENV PORT=8080\nEXPOSE 8080\nCMD ["sh", "-c", "\${RUST_BINARY:-app}"]\n`); return { generated: true, kind: 'rust' };
   }
   const entries = await readdir(dir);
   const csproj = entries.find((entry) => entry.endsWith('.csproj'));
@@ -58,7 +58,7 @@ async function detectDockerfile(dir: string) {
     await writeFile(path.join(dir, 'Dockerfile'), `FROM composer:2 AS deps\nWORKDIR /app\nCOPY composer.* ./\nRUN composer install --no-dev --prefer-dist --no-interaction --no-progress\nFROM php:8.3-apache\nWORKDIR /var/www/html\nCOPY --from=deps /app/vendor ./vendor\nCOPY . .\nRUN a2enmod rewrite\nEXPOSE 80\n`); return { generated: true, kind: 'php' };
   }
   if (await exists(path.join(dir, 'Gemfile'))) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM ruby:3.4-slim\nWORKDIR /app\nCOPY Gemfile Gemfile.lock* ./\nRUN bundle install\nCOPY . .\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "$${RUBY_START_COMMAND:-bundle exec rails server -b 0.0.0.0 -p 3000}"]\n`); return { generated: true, kind: 'ruby' };
+    await writeFile(path.join(dir, 'Dockerfile'), `FROM ruby:3.4-slim\nWORKDIR /app\nCOPY Gemfile Gemfile.lock* ./\nRUN bundle install\nCOPY . .\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "\${RUBY_START_COMMAND:-bundle exec rails server -b 0.0.0.0 -p 3000}"]\n`); return { generated: true, kind: 'ruby' };
   }
   throw new Error('No supported application detected. Add a Dockerfile or use a supported Node.js, Python, Go, Java, Rust, .NET, PHP or Ruby project.');
 }
