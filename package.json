@@ -1,8 +1,5 @@
 {
-  "name": "nexus-hosting",
-  "private": true,
-  "version": "0.1.0",
-  "workspaces": ["apps/*"],
-  "scripts": {"dev": "npm run dev --workspace apps/web", "build": "npm run build --workspace apps/web", "start": "npm run start --workspace apps/web"},
-  "engines": {"node": ">=20"}
+  "name":"nexus-hosting","private":true,"version":"0.2.0","workspaces":["apps/*"],
+  "scripts":{"dev":"npm run dev --workspace apps/web","dev:api":"npm run dev --workspace apps/api","dev:engine":"npm run dev --workspace apps/engine","build":"npm run build --workspace apps/web && npm run build --workspace apps/api && npm run build --workspace apps/engine","start":"npm run start --workspace apps/web"},
+  "engines":{"node":">=20"}
 }
