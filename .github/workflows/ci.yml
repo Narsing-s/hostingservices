@@ -15,8 +15,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: package.json
       - run: npm --version
       - run: npm install --legacy-peer-deps --force --no-audit --no-fund
       - run: npm run build
