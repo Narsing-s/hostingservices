@@ -2,7 +2,7 @@ import Docker from 'dockerode';
 import { waitForHealthyContainer } from './health.js';
 import { switchTraffic } from './router.js';
 
-export type RuntimeSpec = { name: string; image: string; containerPort?: number; hostPort?: number; env?: Record<string, string>; healthPath?: string; domain?: string };
+export type RuntimeSpec = { name: string; image: string; containerPort?: number; hostPort?: number; env?: Record<string, string>; command?: string[]; healthPath?: string; domain?: string };
 
 function dockerClient() {
   if (process.env.DOCKER_HOST) return new Docker({ host: process.env.DOCKER_HOST, port: Number(process.env.DOCKER_PORT ?? 2375) });
@@ -16,7 +16,7 @@ async function createAndStart(docker: Docker, spec: RuntimeSpec, containerName: 
   await ensureNetwork(docker);
   const networkName = process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime';
   const bindings = hostPort > 0 ? { [`${port}/tcp`]: [{ HostPort: String(hostPort) }] } : undefined;
-  const container = await docker.createContainer({ name: containerName, Image: spec.image, Env: Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`), ExposedPorts: { [`${port}/tcp`]: {} }, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, ...(bindings ? { PortBindings: bindings } : {}) }, NetworkingConfig: { EndpointsConfig: { [networkName]: {} } }, Labels: { 'nexus.managed': 'true', 'nexus.runtime': spec.name, 'nexus.deployment-container': containerName, 'traefik.enable': 'false' } });
+  const container = await docker.createContainer({ name: containerName, Image: spec.image, Env: Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`), Cmd: spec.command, ExposedPorts: { [`${port}/tcp`]: {} }, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, ...(bindings ? { PortBindings: bindings } : {}) }, NetworkingConfig: { EndpointsConfig: { [networkName]: {} } }, Labels: { 'nexus.managed': 'true', 'nexus.runtime': spec.name, 'nexus.deployment-container': containerName, 'traefik.enable': 'false' } });
   await container.start();
   return container;
 }
