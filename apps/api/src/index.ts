@@ -20,6 +20,18 @@ app.post('/api/v1/projects', async (req, reply) => {
 
 app.get('/api/v1/deployments', async () => listDeployments());
 
+app.get('/api/v1/deployments/:id/logs', async (req, reply) => {
+  const id = (req.params as { id:string }).id;
+  const deployment = (await listDeployments()).find((item: any) => item.id === id) as any;
+  if (!deployment) return reply.code(404).send({ error: 'Deployment not found' });
+  const runtimeName = deployment.runtime?.name;
+  if (!runtimeName) return reply.send({ deploymentId: id, logs: '', status: deployment.status });
+  const response = await fetch(`${ENGINE_URL}/api/v1/runtime/logs/${encodeURIComponent(runtimeName)}`);
+  const result = await response.json();
+  if (!response.ok) return reply.code(502).send({ error: 'Runtime log request failed', detail: result });
+  return reply.send({ deploymentId: id, status: deployment.status, logs: result.logs ?? '' });
+});
+
 app.post('/api/v1/deployments', async (req, reply) => {
   const body = z.object({
     projectId: z.string(), repo: z.string().url().optional(), ref: z.string().min(1).default('main'),
