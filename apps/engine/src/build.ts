@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile, readFile, access, readdir } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-export type BuildRequest = { repo: string; ref?: string; image: string; deploymentId?: string };
+export type BuildRequest = { repo: string; ref?: string; image: string; deploymentId?: string; service?: string };
 const buildLogs = new Map<string, string>();
 const maxLogSize = 2_000_000;
 
@@ -40,8 +40,33 @@ function nodeDockerfile(pkg: any, outputDir?: 'dist' | 'build') {
   return `FROM node:22-bookworm-slim\nWORKDIR /app\nCOPY package*.json ./\nCOPY pnpm-lock.yaml* yarn.lock* package-lock.json* ./\nRUN ${install}\nCOPY . .\n${pkg?.scripts?.build ? `RUN ${build}\n` : ''}ENV NODE_ENV=production\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "${start}"]\n`;
 }
 
-async function detectDockerfile(dir: string) {
-  if (await exists(path.join(dir, 'Dockerfile'))) return { generated: false, kind: 'dockerfile' };
+type Detection = { generated: boolean; kind: string; contextDir: string; dockerfilePath: string; service?: string; availableServices?: string[] };
+
+async function detectDockerfile(dir: string, requestedService?: string): Promise<Detection> {
+  const rootDockerfile = path.join(dir, 'Dockerfile');
+  if (await exists(rootDockerfile)) return { generated: false, kind: 'dockerfile', contextDir: dir, dockerfilePath: rootDockerfile };
+
+  // Monorepo support: discover first-level application directories that contain their
+  // own Dockerfile. This is common in Render/Railway-style repositories.
+  const entries = await readdir(dir, { withFileTypes: true });
+  const candidates: Array<{ name: string; contextDir: string; dockerfilePath: string }> = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.') || ['node_modules', 'dist', 'build'].includes(entry.name)) continue;
+    const contextDir = path.join(dir, entry.name);
+    const dockerfilePath = path.join(contextDir, 'Dockerfile');
+    if (await exists(dockerfilePath)) candidates.push({ name: entry.name, contextDir, dockerfilePath });
+  }
+
+  if (candidates.length) {
+    const selected = requestedService ? candidates.find((candidate) => candidate.name === requestedService) : candidates[0];
+    if (!selected) throw new Error(`Service '${requestedService}' was not found. Available services: ${candidates.map((candidate) => candidate.name).join(', ')}`);
+    if (candidates.length > 1 && !requestedService) {
+      const preferred = candidates.find((candidate) => ['backend', 'api', 'server', 'app'].includes(candidate.name.toLowerCase()));
+      if (preferred) return { generated: false, kind: 'dockerfile-monorepo', contextDir: preferred.contextDir, dockerfilePath: preferred.dockerfilePath, service: preferred.name, availableServices: candidates.map((candidate) => candidate.name) };
+    }
+    return { generated: false, kind: 'dockerfile-monorepo', contextDir: selected.contextDir, dockerfilePath: selected.dockerfilePath, service: selected.name, availableServices: candidates.map((candidate) => candidate.name) };
+  }
+
   const pkg = await packageJson(dir);
   if (pkg) {
     const scripts = pkg.scripts ?? {};
@@ -50,55 +75,60 @@ async function detectDockerfile(dir: string) {
     const angular = await exists(path.join(dir, 'angular.json'));
     const staticSite = vite || astro || angular || (!scripts.start && Boolean(scripts.build));
     const outputDir = angular ? 'dist' : vite || astro ? 'dist' : 'build';
-    await writeFile(path.join(dir, 'Dockerfile'), nodeDockerfile(pkg, staticSite ? outputDir : undefined));
-    return { generated: true, kind: staticSite ? 'node-static' : 'node' };
+    await writeFile(rootDockerfile, nodeDockerfile(pkg, staticSite ? outputDir : undefined));
+    return { generated: true, kind: staticSite ? 'node-static' : 'node', contextDir: dir, dockerfilePath: rootDockerfile };
   }
   if (await exists(path.join(dir, 'requirements.txt')) || await exists(path.join(dir, 'pyproject.toml'))) {
     const hasManage = await exists(path.join(dir, 'manage.py'));
     const pythonCmd = hasManage ? 'gunicorn ${DJANGO_WSGI_MODULE:-app.wsgi}:application --bind 0.0.0.0:8000' : 'gunicorn ${PYTHON_APP_MODULE:-app}:app --bind 0.0.0.0:8000';
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt* pyproject.toml* poetry.lock* ./\nRUN pip install --no-cache-dir --upgrade pip && if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir .; fi && pip install --no-cache-dir gunicorn\nCOPY . .\nENV PORT=8000\nEXPOSE 8000\nCMD ["sh", "-c", "${pythonCmd}"]\n`);
-    return { generated: true, kind: 'python' };
+    await writeFile(rootDockerfile, `FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt* pyproject.toml* poetry.lock* ./\nRUN pip install --no-cache-dir --upgrade pip && if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir .; fi && pip install --no-cache-dir gunicorn\nCOPY . .\nENV PORT=8000\nEXPOSE 8000\nCMD ["sh", "-c", "${pythonCmd}"]\n`);
+    return { generated: true, kind: 'python', contextDir: dir, dockerfilePath: rootDockerfile };
   }
   if (await exists(path.join(dir, 'go.mod'))) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM golang:1.24-alpine AS build\nWORKDIR /src\nCOPY go.mod go.sum* ./\nRUN go mod download\nCOPY . .\nRUN CGO_ENABLED=0 go build -o /out/app .\nFROM alpine:3.22\nRUN adduser -D app\nUSER app\nCOPY --from=build /out/app /app\nENV PORT=8080\nEXPOSE 8080\nCMD ["/app"]\n`); return { generated: true, kind: 'go' };
+    await writeFile(rootDockerfile, `FROM golang:1.24-alpine AS build\nWORKDIR /src\nCOPY go.mod go.sum* ./\nRUN go mod download\nCOPY . .\nRUN CGO_ENABLED=0 go build -o /out/app .\nFROM alpine:3.22\nRUN adduser -D app\nUSER app\nCOPY --from=build /out/app /app\nENV PORT=8080\nEXPOSE 8080\nCMD ["/app"]\n`); return { generated: true, kind: 'go', contextDir: dir, dockerfilePath: rootDockerfile };
   }
   if (await exists(path.join(dir, 'pom.xml'))) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM maven:3.9-eclipse-temurin-21 AS build\nWORKDIR /src\nCOPY pom.xml .\nRUN mvn -B -DskipTests dependency:go-offline\nCOPY . .\nRUN mvn -B -DskipTests package\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/target/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-maven' };
+    await writeFile(rootDockerfile, `FROM maven:3.9-eclipse-temurin-21 AS build\nWORKDIR /src\nCOPY pom.xml .\nRUN mvn -B -DskipTests dependency:go-offline\nCOPY . .\nRUN mvn -B -DskipTests package\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/target/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-maven', contextDir: dir, dockerfilePath: rootDockerfile };
   }
   if (await exists(path.join(dir, 'build.gradle')) || await exists(path.join(dir, 'build.gradle.kts'))) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM gradle:8-jdk21 AS build\nWORKDIR /src\nCOPY . .\nRUN gradle build -x test --no-daemon\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/build/libs/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-gradle' };
+    await writeFile(rootDockerfile, `FROM gradle:8-jdk21 AS build\nWORKDIR /src\nCOPY . .\nRUN gradle build -x test --no-daemon\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/build/libs/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-gradle', contextDir: dir, dockerfilePath: rootDockerfile };
   }
   if (await exists(path.join(dir, 'Cargo.toml'))) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM rust:1.89-alpine AS build\nRUN apk add --no-cache musl-dev\nWORKDIR /src\nCOPY . .\nRUN cargo build --release\nFROM alpine:3.22\nWORKDIR /app\nCOPY --from=build /src/target/release/ /app/\nENV PORT=8080\nEXPOSE 8080\nCMD ["sh", "-c", "\${RUST_BINARY:-app}"]\n`); return { generated: true, kind: 'rust' };
+    await writeFile(rootDockerfile, `FROM rust:1.89-alpine AS build\nRUN apk add --no-cache musl-dev\nWORKDIR /src\nCOPY . .\nRUN cargo build --release\nFROM alpine:3.22\nWORKDIR /app\nCOPY --from=build /src/target/release/ /app/\nENV PORT=8080\nEXPOSE 8080\nCMD ["sh", "-c", "\${RUST_BINARY:-app}"]\n`); return { generated: true, kind: 'rust', contextDir: dir, dockerfilePath: rootDockerfile };
   }
-  const entries = await readdir(dir);
-  const csproj = entries.find((entry) => entry.endsWith('.csproj'));
+  const csproj = entries.find((entry) => entry.name.endsWith('.csproj'))?.name;
   if (csproj) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build\nWORKDIR /src\nCOPY . .\nRUN dotnet publish ${csproj} -c Release -o /out\nFROM mcr.microsoft.com/dotnet/aspnet:9.0\nWORKDIR /app\nCOPY --from=build /out .\nENV ASPNETCORE_URLS=http://+:8080\nEXPOSE 8080\nENTRYPOINT ["dotnet", "${csproj.replace(/\.csproj$/i, '.dll')}"]\n`); return { generated: true, kind: 'dotnet' };
+    await writeFile(rootDockerfile, `FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build\nWORKDIR /src\nCOPY . .\nRUN dotnet publish ${csproj} -c Release -o /out\nFROM mcr.microsoft.com/dotnet/aspnet:9.0\nWORKDIR /app\nCOPY --from=build /out .\nENV ASPNETCORE_URLS=http://+:8080\nEXPOSE 8080\nENTRYPOINT ["dotnet", "${csproj.replace(/\.csproj$/i, '.dll')}"]\n`); return { generated: true, kind: 'dotnet', contextDir: dir, dockerfilePath: rootDockerfile };
   }
   if (await exists(path.join(dir, 'composer.json'))) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM composer:2 AS deps\nWORKDIR /app\nCOPY composer.* ./\nRUN composer install --no-dev --prefer-dist --no-interaction --no-progress\nFROM php:8.3-apache\nWORKDIR /var/www/html\nCOPY --from=deps /app/vendor ./vendor\nCOPY . .\nRUN a2enmod rewrite\nEXPOSE 80\n`); return { generated: true, kind: 'php' };
+    await writeFile(rootDockerfile, `FROM composer:2 AS deps\nWORKDIR /app\nCOPY composer.* ./\nRUN composer install --no-dev --prefer-dist --no-interaction --no-progress\nFROM php:8.3-apache\nWORKDIR /var/www/html\nCOPY --from=deps /app/vendor ./vendor\nCOPY . .\nRUN a2enmod rewrite\nEXPOSE 80\n`); return { generated: true, kind: 'php', contextDir: dir, dockerfilePath: rootDockerfile };
   }
   if (await exists(path.join(dir, 'Gemfile'))) {
-    await writeFile(path.join(dir, 'Dockerfile'), `FROM ruby:3.4-slim\nWORKDIR /app\nCOPY Gemfile Gemfile.lock* ./\nRUN bundle install\nCOPY . .\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "\${RUBY_START_COMMAND:-bundle exec rails server -b 0.0.0.0 -p 3000}"]\n`); return { generated: true, kind: 'ruby' };
+    await writeFile(rootDockerfile, `FROM ruby:3.4-slim\nWORKDIR /app\nCOPY Gemfile Gemfile.lock* ./\nRUN bundle install\nCOPY . .\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "\${RUBY_START_COMMAND:-bundle exec rails server -b 0.0.0.0 -p 3000}"]\n`);
+    return { generated: true, kind: 'ruby', contextDir: dir, dockerfilePath: rootDockerfile };
   }
-  throw new Error('No supported application detected. Add a Dockerfile or use a supported Node.js, Python, Go, Java, Rust, .NET, PHP or Ruby project.');
+  throw new Error('No supported application detected. Add a Dockerfile or use a supported Node.js, Python, Go, Java, Rust, .NET, PHP or Ruby project. For monorepos, place a Dockerfile in the service directory or specify the service.');
 }
 
 export async function buildFromGit(request: BuildRequest) {
   const dir = await mkdtemp(path.join(tmpdir(), 'nexus-build-'));
   clearBuildLogs(request.deploymentId ?? '');
-  appendLog(request.deploymentId, `$ nexus build ${request.repo} @ ${request.ref ?? 'default'}\n`);
+  appendLog(request.deploymentId, `$ nexus build ${request.repo} @ ${request.ref ?? 'default'}${request.service ? ` (service: ${request.service})` : ''}\n`);
   try {
     const cloneArgs = ['clone', '--depth', '1']; if (request.ref) cloneArgs.push('--branch', request.ref); cloneArgs.push(request.repo, dir);
     appendLog(request.deploymentId, '$ git clone ' + request.repo + '\n');
     await run('git', cloneArgs, { timeout: 120000, deploymentId: request.deploymentId });
     appendLog(request.deploymentId, '\n✓ Source downloaded\n');
-    const detected = await detectDockerfile(dir);
-    appendLog(request.deploymentId, `✓ Runtime detected: ${detected.kind}${detected.generated ? ' (Dockerfile generated)' : ''}\n\n$ docker build --pull -t ${request.image} .\n`);
-    await run('docker', ['build', '--pull', '-t', request.image, dir], { timeout: 900000, deploymentId: request.deploymentId });
+    const detected = await detectDockerfile(dir, request.service);
+    const serviceSuffix = detected.service ? ` [service=${detected.service}]` : '';
+    appendLog(request.deploymentId, `✓ Runtime detected: ${detected.kind}${detected.generated ? ' (Dockerfile generated)' : ''}${serviceSuffix}\n`);
+    if (detected.availableServices && detected.availableServices.length > 1) {
+      appendLog(request.deploymentId, `  Available services: ${detected.availableServices.join(', ')}\n`);
+    }
+    appendLog(request.deploymentId, `\n$ docker build --pull -f ${detected.dockerfilePath} -t ${request.image} ${detected.contextDir}\n`);
+    await run('docker', ['build', '--pull', '-f', detected.dockerfilePath, '-t', request.image, detected.contextDir], { timeout: 900000, deploymentId: request.deploymentId });
     appendLog(request.deploymentId, `\n✓ Build completed: ${request.image}\n`);
-    return { image: request.image, repository: request.repo, ref: request.ref ?? 'default', status: 'built', runtime: detected.kind, dockerfileGenerated: detected.generated };
+    return { image: request.image, repository: request.repo, ref: request.ref ?? 'default', status: 'built', runtime: detected.kind, dockerfileGenerated: detected.generated, service: detected.service, availableServices: detected.availableServices };
   } catch (error) {
     appendLog(request.deploymentId, `\n✗ BUILD FAILED: ${error instanceof Error ? error.message : String(error)}\n`);
     throw error;
