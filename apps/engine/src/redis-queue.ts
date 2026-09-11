@@ -9,6 +9,7 @@ export type DeploymentJob = {
   containerPort?: number;
   hostPort?: number;
   env?: Record<string, string>;
+  command?: string[];
   healthPath?: string;
   domain?: string;
 };
