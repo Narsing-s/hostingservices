@@ -3,12 +3,10 @@ import http from 'node:http';
 import { buildFromGit } from './build.js';
 import { enqueueDeployment, queueStats } from './redis-queue.js';
 
-const docker = process.platform === 'win32'
-  ? new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' })
-  : new Docker({ socketPath: process.env.DOCKER_SOCKET ?? '/var/run/docker.sock' });
+const docker = process.platform === 'win32' ? new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' }) : new Docker({ socketPath: process.env.DOCKER_SOCKET ?? '/var/run/docker.sock' });
 const port = Number(process.env.PORT ?? 4100);
 
-type DeployBody = { name: string; image: string; containerPort?: number; hostPort?: number; env?: Record<string, string>; previousImage?: string };
+type DeployBody = { name: string; image: string; deploymentId?: string; containerPort?: number; hostPort?: number; env?: Record<string, string>; previousImage?: string; healthPath?: string };
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -18,12 +16,7 @@ function readBody(req: http.IncomingMessage): Promise<string> {
     req.on('error', reject);
   });
 }
-
-function send(res: http.ServerResponse, status: number, value: unknown) {
-  res.statusCode = status;
-  res.setHeader('content-type', 'application/json');
-  res.end(JSON.stringify(value));
-}
+function send(res: http.ServerResponse, status: number, value: unknown) { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(value)); }
 
 async function main(req: http.IncomingMessage, res: http.ServerResponse) {
   try {
@@ -39,7 +32,7 @@ async function main(req: http.IncomingMessage, res: http.ServerResponse) {
       }
       const idempotencyKey = req.headers['idempotency-key']?.toString();
       const job = await enqueueDeployment({ operation: rollback ? 'rollback' : 'deploy', ...body }, idempotencyKey);
-      send(res, 202, { accepted: true, queued: true, jobId: job.id, name: body.name });
+      send(res, 202, { accepted: true, queued: true, jobId: job.id, deploymentId: body.deploymentId, name: body.name });
       return;
     }
 
