@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EnvironmentType { PRODUCTION STAGING PREVIEW }
+enum ServiceType { WEB WORKER CRON DATABASE }
+enum DeploymentStatus { QUEUED BUILDING STARTING HEALTHY FAILED STOPPED }
+enum MemberRole { OWNER ADMIN DEVELOPER VIEWER }
+
+model Workspace {
+  id        String       @id @default(cuid())
+  name      String
+  slug      String       @unique
+  createdAt DateTime     @default(now())
+  projects  Project[]
+  members   Membership[]
+}
+
+model Membership {
+  id          String     @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        MemberRole @default(DEVELOPER)
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@unique([workspaceId, userId])
+}
+
+model Project {
+  id           String        @id @default(cuid())
+  workspaceId  String
+  name         String
+  slug         String
+  createdAt    DateTime      @default(now())
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  environments Environment[]
+  @@unique([workspaceId, slug])
+}
+
+model Environment {
+  id         String          @id @default(cuid())
+  projectId  String
+  name       String
+  type       EnvironmentType
+  createdAt  DateTime        @default(now())
+  project    Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  services   Service[]
+  @@unique([projectId, name])
+}
+
+model Service {
+  id            String               @id @default(cuid())
+  environmentId String
+  name          String
+  type          ServiceType           @default(WEB)
+  repository    String?
+  branch        String?
+  image         String?
+  port          Int?
+  healthPath    String?              @default("/health")
+  createdAt     DateTime             @default(now())
+  environment   Environment          @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  deployments   Deployment[]
+  variables     EnvironmentVariable[]
+  domains       Domain[]
+  @@unique([environmentId, name])
+}
+
+model EnvironmentVariable {
+  id        String  @id @default(cuid())
+  serviceId String
+  key       String
+  value     String
+  secret    Boolean @default(false)
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  @@unique([serviceId, key])
+}
+
+model Deployment {
+  id          String           @id @default(cuid())
+  serviceId   String
+  status      DeploymentStatus @default(QUEUED)
+  sourceRef   String?
+  image       String?
+  containerId String?
+  url         String?
+  error       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  service     Service          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  logs        DeploymentLog[]
+  @@index([serviceId, createdAt])
+}
+
+model DeploymentLog {
+  id           String     @id @default(cuid())
+  deploymentId String
+  level        String     @default("info")
+  message      String
+  createdAt    DateTime   @default(now())
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+  @@index([deploymentId, createdAt])
+}
+
+model Domain {
+  id        String  @id @default(cuid())
+  serviceId String
+  hostname  String  @unique
+  verified  Boolean @default(false)
+  tls       Boolean @default(true)
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+}

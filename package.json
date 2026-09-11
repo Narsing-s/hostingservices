@@ -1,5 +1,19 @@
 {
-  "name":"nexus-hosting","private":true,"version":"0.2.0","workspaces":["apps/*"],
-  "scripts":{"dev":"npm run dev --workspace apps/web","dev:api":"npm run dev --workspace apps/api","dev:engine":"npm run dev --workspace apps/engine","build":"npm run build --workspace apps/web && npm run build --workspace apps/api && npm run build --workspace apps/engine","start":"npm run start --workspace apps/web"},
-  "engines":{"node":">=20"}
+  "name": "nexus-hosting",
+  "private": true,
+  "version": "0.3.0",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:engine": "npm run dev --workspace apps/engine",
+    "dev:agent": "npm run dev --workspace apps/agent",
+    "build": "npm run build --workspace apps/web && npm run build --workspace apps/api && npm run build --workspace apps/engine && npm run build --workspace apps/agent && npm run build --workspace @nexus/providers && npm run build --workspace @nexus/secrets",
+    "start": "npm run start --workspace apps/web",
+    "typecheck": "npm run build --workspace apps/api && npm run build --workspace apps/engine && npm run build --workspace apps/agent",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f"
+  },
+  "engines": { "node": ">=20" }
 }

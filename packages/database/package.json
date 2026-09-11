@@ -1,0 +1,1 @@
+{"name":"@nexus/database","private":true,"scripts":{"generate":"prisma generate","migrate":"prisma migrate dev","studio":"prisma studio"},"dependencies":{"@prisma/client":"latest"},"devDependencies":{"prisma":"latest"}}
