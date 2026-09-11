@@ -1,127 +1,35 @@
 'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowUpRight, Boxes, Database, Globe2, GitBranch, LayoutDashboard, ListChecks, Rocket, Server, Settings2, ShieldCheck, Sparkles, Terminal, X } from 'lucide-react';
-
-const API = process.env.NEXT_PUBLIC_NEXUS_API_URL ?? 'http://localhost:4000';
-
-type Tab = 'overview' | 'projects' | 'services' | 'deployments' | 'domains' | 'observability';
-type Deployment = { id:string; projectId:string; status:string; repo?:string; image?:string; runtime?:{url?:string;host?:string;tls?:boolean;name?:string}; createdAt:string };
-type Project = { id:string; name:string; repo?:string; createdAt:string };
-type Domain = { id:string; projectId:string; domain:string; status:string; verifiedAt?:string; createdAt:string };
-
-const services = [
-  ['Web Service','Frontend, API and full-stack applications.',Globe2],
-  ['Worker','Background jobs and long-running consumers.',Boxes],
-  ['Private Service','Internal APIs and service-to-service workloads.',ShieldCheck],
-  ['Database','Connect PostgreSQL, Redis and external data services.',Database],
-] as const;
-
-export default function Home() {
-  const [tab,setTab] = useState<Tab>('overview');
-  const [open,setOpen] = useState(false);
-  const [busy,setBusy] = useState(false);
-  const [message,setMessage] = useState('');
-  const [projects,setProjects] = useState<Project[]>([]);
-  const [deployments,setDeployments] = useState<Deployment[]>([]);
-  const [domains,setDomains] = useState<Domain[]>([]);
-  const [logs,setLogs] = useState<{id:string;text:string} | null>(null);
-  const [projectName,setProjectName] = useState('my-app');
-  const [repo,setRepo] = useState('');
-  const [ref,setRef] = useState('main');
-  const [serviceType,setServiceType] = useState('web');
-  const [containerPort,setContainerPort] = useState('3000');
-  const [hostPort,setHostPort] = useState('8088');
-  const [domain,setDomain] = useState('');
-  const [healthPath,setHealthPath] = useState('/');
-  const [command,setCommand] = useState('');
-
-  const load = async () => {
-    try {
-      const [p,d,dm] = await Promise.all([
-        fetch(`${API}/api/v1/projects`).then(r=>r.ok?r.json():[]),
-        fetch(`${API}/api/v1/deployments`).then(r=>r.ok?r.json():[]),
-        fetch(`${API}/api/v1/domains`).then(r=>r.ok?r.json():[]),
-      ]);
-      setProjects(p); setDeployments(d); setDomains(dm);
-    } catch { setMessage('API is not reachable. Start the Nexus API on port 4000.'); }
-  };
-  useEffect(()=>{ load(); },[]);
-
-  const selectedProject = useMemo(()=>projects.find(p=>p.name===projectName),[projects,projectName]);
-
-  async function deploy() {
-    setBusy(true); setMessage('Preparing deployment…');
-    try {
-      let project = selectedProject;
-      if (!project) {
-        const p = await fetch(`${API}/api/v1/projects`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:projectName||'my-app',repo:repo||undefined})});
-        const value = await p.json(); if(!p.ok) throw new Error(value.detail||value.error||'Project creation failed');
-        project=value;
-      }
-      if(domain.trim()) {
-        const existing = domains.find(d=>d.projectId===project!.id && d.domain===domain.trim().toLowerCase());
-        if (!existing) {
-          const dr=await fetch(`${API}/api/v1/domains`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:project!.id,domain:domain.trim()})});
-          const value=await dr.json(); if(!dr.ok) throw new Error(value.detail||value.error||'Domain registration failed');
-          setMessage(`DNS verification required: add TXT ${value.verification.name} = ${value.verification.value}, then use Domains → Verify.`);
-          await load(); setTab('domains'); setOpen(false); return;
-        }
-        if(existing.status!=='verified') throw new Error('Custom domain is not verified yet. Open Domains and verify it first.');
-      }
-      setMessage(repo?'Building repository…':'Starting runtime…');
-      const isPublic=serviceType==='web';
-      const d=await fetch(`${API}/api/v1/deployments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:project!.id,repo:repo||project!.repo||undefined,ref:ref||'main',image:(repo||project!.repo)?undefined:'nginx:alpine',serviceType,public:isPublic,healthMode:serviceType==='worker'||serviceType==='cron'?'process':'auto',command:command.trim()?command.trim().split(/\s+/):undefined,hostPort:isPublic?Number(hostPort)||undefined:undefined,containerPort:Number(containerPort)||80,healthPath:isPublic?(healthPath||undefined):undefined,domain:domain.trim()||undefined})});
-      const result=await d.json(); if(!d.ok) throw new Error(result.detail||result.error||'Deployment failed');
-      setMessage(result.runtime?.url?`Deployment accepted → ${result.runtime.url}`:'Deployment accepted; runtime worker is processing it.');
-      setOpen(false); setTab('deployments'); await load();
-    } catch(e) { setMessage(e instanceof Error?e.message:'Deployment failed'); }
-    finally { setBusy(false); }
-  }
-
-  async function verifyDomain(d:Domain) {
-    setMessage(`Verifying ${d.domain}…`);
-    try { const r=await fetch(`${API}/api/v1/domains/${d.id}/verify`,{method:'POST'}); const v=await r.json(); if(!r.ok) throw new Error(v.detail||v.error||'DNS verification failed'); setMessage(`${d.domain} verified successfully.`); await load(); }
-    catch(e){setMessage(e instanceof Error?e.message:'DNS verification failed');}
-  }
-
-  async function showLogs(d:Deployment) {
-    setLogs({id:d.id,text:'Loading logs…'});
-    try { const r=await fetch(`${API}/api/v1/deployments/${d.id}/logs`); const v=await r.json(); if(!r.ok) throw new Error(v.detail||v.error||'Unable to load logs'); setLogs({id:d.id,text:v.logs||'(no runtime logs yet)'}); }
-    catch(e){setLogs({id:d.id,text:e instanceof Error?e.message:'Unable to load logs'});}
-  }
-
-  const nav: [Tab,string,typeof LayoutDashboard][] = [['overview','Overview',LayoutDashboard],['projects','Projects',Server],['services','Services',Boxes],['deployments','Deployments',ListChecks],['domains','Domains',Globe2],['observability','Observability',Activity]];
-  return <main>
-    <aside>
-      <div className="brand"><div className="logo">N</div><div><b>NEXUS</b><small>HOSTING</small></div></div>
-      <nav>{nav.map(([id,label,I])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}><I size={15}/>{label}</button>)}</nav>
-      <div className="sideCard"><Sparkles size={17}/><b>Autopilot</b><span>Runtime-aware infrastructure recommendations.</span></div>
-    </aside>
-
-    <section className="content">
-      <header><div><span className="eyebrow">CONTROL PLANE / PRODUCTION</span><h1>{tab==='overview'?'Deploy the application, not the infrastructure.':tab[0].toUpperCase()+tab.slice(1)}</h1><p>{tab==='overview'?'Frontend, backend, APIs, workers and private services run through one deployment graph with health checks, routing and recovery.':'Manage real Nexus resources from this control plane. Every action below calls the live API.'}</p></div><button onClick={()=>setOpen(true)}><Rocket size={17}/>New deployment</button></header>
-      {message&&<div className="toast"><ShieldCheck size={18}/><span><b>System status</b><small>{message}</small></span><button className="toastClose" onClick={()=>setMessage('')}><X size={14}/></button></div>}
-
-      {tab==='overview'&&<>
-        <div className="heroGrid"><div className="heroCard"><div className="status"><i/>{deployments.some(d=>['ready','starting','building'].includes(d.status))?'Runtime activity detected':'Control plane ready'}</div><div className="metric"><strong>{deployments.length}</strong><span>deployments tracked</span></div><div className="graph"><div className="node source"><GitBranch/><b>Source</b><small>{deployments[0]?.repo||'Git or container image'}</small></div><div className="line"/><div className="node"><Globe2/><b>Runtime</b><small>{deployments[0]?.status||'ready'}</small></div><div className="line"/><div className="node"><Database/><b>Data</b><small>connectable</small></div></div></div><div className="insight"><div className="icon"><Sparkles/></div><span className="eyebrow">NEXUS AUTOPILOT</span><h2>One graph. Every workload.</h2><p>Use web services, workers and private services together instead of forcing every workload into a web server.</p><button className="ghost" onClick={()=>setTab('services')}>Explore services <ArrowUpRight size={15}/></button></div></div>
-        <SectionHead title="Services" action="View catalog" onClick={()=>setTab('services')}/><ServiceGrid/>
-        <DeploymentStream deployments={deployments} onLogs={showLogs}/>
-      </>}
-
-      {tab==='projects'&&<Panel title="Projects" description="Projects group services, deployments and domains."><div className="table">{projects.length?projects.map(p=><div className="row" key={p.id}><div><b>{p.name}</b><small>{p.repo||'No Git repository linked'}</small></div><span>{new Date(p.createdAt).toLocaleString()}</span><button className="mini" onClick={()=>{setProjectName(p.name);setRepo(p.repo||'');setOpen(true)}}>Deploy</button></div>):<Empty text="No projects yet. Create your first deployment."/>}</div></Panel>}
-      {tab==='services'&&<Panel title="Service catalog" description="Every workload type supported by the deployment engine."><ServiceGrid/><div className="capabilities"><b>Supported build runtimes</b><span>Dockerfile · Node.js · Python · Go · Java Maven · Java Gradle · Rust · .NET · PHP · Ruby</span></div></Panel>}
-      {tab==='deployments'&&<Panel title="Deployments" description="Live deployment records returned by the API."><div className="table">{deployments.length?deployments.map(d=><div className="row" key={d.id}><div><b>{d.repo||d.image||'deployment'}</b><small>{d.id}</small></div><strong className={`state ${d.status}`}>{d.status}</strong><span>{new Date(d.createdAt).toLocaleString()}</span><button className="mini" onClick={()=>showLogs(d)}>Logs</button></div>):<Empty text="No deployments yet."/>}</div></Panel>}
-      {tab==='domains'&&<Panel title="Domains" description="Register domains and verify DNS before routing production traffic."><div className="table">{domains.length?domains.map(d=><div className="row" key={d.id}><div><b>{d.domain}</b><small>Project {d.projectId.slice(0,8)}…</small></div><strong className={`state ${d.status}`}>{d.status}</strong><button className="mini" disabled={d.status==='verified'} onClick={()=>verifyDomain(d)}>{d.status==='verified'?'Verified':'Verify DNS'}</button></div>):<Empty text="No custom domains registered."/>}</div></Panel>}
-      {tab==='observability'&&<Panel title="Observability" description="Inspect deployment state and fetch runtime logs from the engine."><DeploymentStream deployments={deployments} onLogs={showLogs}/></Panel>}
-
-      {logs&&<div className="logsOverlay"><div className="logsPanel"><div className="modalHead"><div><span className="eyebrow">RUNTIME LOGS</span><h2>Deployment {logs.id.slice(0,8)}…</h2></div><button className="close" onClick={()=>setLogs(null)}><X size={17}/></button></div><pre>{logs.text}</pre></div></div>}
-
-      {open&&<div className="modalBackdrop"><div className="deployModal"><div className="modalHead"><div><span className="eyebrow">NEW DEPLOYMENT</span><h2>Deploy any application</h2></div><button className="close" onClick={()=>setOpen(false)}><X size={17}/></button></div><label>Project name<input value={projectName} onChange={e=>setProjectName(e.target.value)} placeholder="my-app"/></label><label>Git repository URL <span>(or leave empty for an image)</span><input value={repo} onChange={e=>setRepo(e.target.value)} placeholder="https://github.com/owner/repository"/></label><div className="formGrid"><label>Service type<select value={serviceType} onChange={e=>setServiceType(e.target.value)}><option value="web">Web / frontend / API</option><option value="worker">Worker</option><option value="private">Private service</option><option value="cron">Cron / job</option></select></label><label>Branch / ref<input value={ref} onChange={e=>setRef(e.target.value)} placeholder="main"/></label></div><div className="formGrid"><label>Container port<input type="number" value={containerPort} onChange={e=>setContainerPort(e.target.value)}/></label><label>Host port<input type="number" value={hostPort} onChange={e=>setHostPort(e.target.value)} disabled={serviceType!=='web'}/></label></div><div className="formGrid"><label>Start command <span>(optional)</span><input value={command} onChange={e=>setCommand(e.target.value)} placeholder="npm start / python app.py"/></label><label>Health path <span>(web only)</span><input value={healthPath} onChange={e=>setHealthPath(e.target.value)} placeholder="/health" disabled={serviceType!=='web'}/></label></div><label>Custom domain <span>(register and verify DNS before deployment)</span><input value={domain} onChange={e=>setDomain(e.target.value)} placeholder="app.example.com" disabled={serviceType!=='web'}/></label><div className="modalNote">Dockerfiles are preferred. Without one, Nexus auto-detects common Node.js, Python, Go, Java, Rust, .NET, PHP and Ruby projects.</div><button className="deployAction" onClick={deploy} disabled={busy}><Rocket size={16}/>{busy?'Deploying…':'Deploy now'}</button></div></div>}
-    </section>
-  </main>;
+const API=process.env.NEXT_PUBLIC_NEXUS_API_URL??'http://localhost:4000';
+type Tab='overview'|'projects'|'services'|'deployments'|'domains'|'observability';
+type Deployment={id:string;projectId:string;status:string;repo?:string;image?:string;runtime?:{url?:string;host?:string;tls?:boolean;name?:string};createdAt:string};
+type Project={id:string;name:string;repo?:string;createdAt:string};
+type Domain={id:string;projectId:string;domain:string;status:string;verifiedAt?:string;createdAt:string};
+type GithubRepo={fullName:string;name:string;private:boolean;defaultBranch:string;cloneUrl:string;owner:string};
+const services=[['Web Service','Frontend, API and full-stack applications.',Globe2],['Worker','Background jobs and long-running consumers.',Boxes],['Private Service','Internal APIs and service-to-service workloads.',ShieldCheck],['Database','Connect PostgreSQL, Redis and external data services.',Database]] as const;
+export default function Home(){
+const [tab,setTab]=useState<Tab>('overview'),[open,setOpen]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[projects,setProjects]=useState<Project[]>([]),[deployments,setDeployments]=useState<Deployment[]>([]),[domains,setDomains]=useState<Domain[]>([]),[logs,setLogs]=useState<{id:string;text:string}|null>(null),[projectName,setProjectName]=useState('my-app'),[repo,setRepo]=useState(''),[ref,setRef]=useState('main'),[serviceType,setServiceType]=useState('web'),[containerPort,setContainerPort]=useState('3000'),[hostPort,setHostPort]=useState('8088'),[domain,setDomain]=useState(''),[healthPath,setHealthPath]=useState('/'),[command,setCommand]=useState(''),[githubRepos,setGithubRepos]=useState<GithubRepo[]>([]),[githubConnected,setGithubConnected]=useState(false);
+const load=async()=>{try{const [p,d,dm]=await Promise.all([fetch(`${API}/api/v1/projects`,{credentials:'include'}).then(r=>r.ok?r.json():[]),fetch(`${API}/api/v1/deployments`,{credentials:'include'}).then(r=>r.ok?r.json():[]),fetch(`${API}/api/v1/domains`,{credentials:'include'}).then(r=>r.ok?r.json():[])]);setProjects(p);setDeployments(d);setDomains(dm);}catch{setMessage('API is not reachable. Start the Nexus API on port 4000.');}};
+useEffect(()=>{load();const timer=setInterval(load,2000);return()=>clearInterval(timer);},[]);
+useEffect(()=>{if(!open)return;fetch(`${API}/api/auth/github/repos`,{credentials:'include'}).then(async r=>{if(!r.ok)throw new Error();return r.json()}).then(v=>{setGithubRepos(v.repositories??[]);setGithubConnected(true);}).catch(()=>{setGithubRepos([]);setGithubConnected(false);});},[open]);
+useEffect(()=>{if(!logs)return;const deployment=deployments.find(d=>d.id===logs.id);if(!deployment||['ready','failed'].includes(deployment.status))return;const timer=setInterval(async()=>{try{const r=await fetch(`${API}/api/v1/deployments/${logs.id}/logs`,{credentials:'include'});const v=await r.json();if(r.ok)setLogs(current=>current&&current.id===logs.id?{id:logs.id,text:v.logs||'(waiting for deployment logs…)'}:current);}catch{}},1500);return()=>clearInterval(timer);},[logs?.id,deployments]);
+const selectedProject=useMemo(()=>projects.find(p=>p.name===projectName),[projects,projectName]);
+async function deploy(){setBusy(true);setMessage('Preparing deployment…');try{let project=selectedProject;if(!project){const p=await fetch(`${API}/api/v1/projects`,{method:'POST',headers:{'content-type':'application/json'},credentials:'include',body:JSON.stringify({name:projectName||'my-app',repo:repo||undefined})});const value=await p.json();if(!p.ok)throw new Error(value.detail||value.error||'Project creation failed');project=value;}if(domain.trim()){const existing=domains.find(d=>d.projectId===project!.id&&d.domain===domain.trim().toLowerCase());if(!existing){const dr=await fetch(`${API}/api/v1/domains`,{method:'POST',headers:{'content-type':'application/json'},credentials:'include',body:JSON.stringify({projectId:project!.id,domain:domain.trim()})});const value=await dr.json();if(!dr.ok)throw new Error(value.detail||value.error||'Domain registration failed');setMessage(`DNS verification required: add TXT ${value.verification.name} = ${value.verification.value}, then use Domains → Verify.`);await load();setTab('domains');setOpen(false);return;}if(existing.status!=='verified')throw new Error('Custom domain is not verified yet. Open Domains and verify it first.');}setMessage(repo?'Build started — open Logs to watch it live.':'Starting runtime…');const isPublic=serviceType==='web';const d=await fetch(`${API}/api/v1/deployments`,{method:'POST',headers:{'content-type':'application/json'},credentials:'include',body:JSON.stringify({projectId:project!.id,repo:repo||project!.repo||undefined,ref:ref||'main',image:(repo||project!.repo)?undefined:'nginx:alpine',serviceType,public:isPublic,healthMode:serviceType==='worker'||serviceType==='cron'?'process':'auto',command:command.trim()?command.trim().split(/\s+/):undefined,hostPort:isPublic?Number(hostPort)||undefined:undefined,containerPort:Number(containerPort)||80,healthPath:isPublic?(healthPath||undefined):undefined,domain:domain.trim()||undefined})});const result=await d.json();if(!d.ok)throw new Error(result.detail||result.error||'Deployment failed');setMessage('Deployment queued. Build and runtime logs are now streaming.');setOpen(false);setTab('deployments');await load();}catch(e){setMessage(e instanceof Error?e.message:'Deployment failed');}finally{setBusy(false);}}
+async function verifyDomain(d:Domain){setMessage(`Verifying ${d.domain}…`);try{const r=await fetch(`${API}/api/v1/domains/${d.id}/verify`,{method:'POST',credentials:'include'});const v=await r.json();if(!r.ok)throw new Error(v.detail||v.error||'DNS verification failed');setMessage(`${d.domain} verified successfully.`);await load();}catch(e){setMessage(e instanceof Error?e.message:'DNS verification failed');}}
+async function showLogs(d:Deployment){setLogs({id:d.id,text:'Loading build/runtime logs…'});try{const r=await fetch(`${API}/api/v1/deployments/${d.id}/logs`,{credentials:'include'});const v=await r.json();if(!r.ok)throw new Error(v.detail||v.error||'Unable to load logs');setLogs({id:d.id,text:v.logs||'(waiting for deployment logs…)'});}catch(e){setLogs({id:d.id,text:e instanceof Error?e.message:'Unable to load logs'});}}
+const nav:[Tab,string,typeof LayoutDashboard][]=[['overview','Overview',LayoutDashboard],['projects','Projects',Server],['services','Services',Boxes],['deployments','Deployments',ListChecks],['domains','Domains',Globe2],['observability','Observability',Activity]];
+return <main><aside><div className="brand"><div className="logo">N</div><div><b>NEXUS</b><small>HOSTING</small></div></div><nav>{nav.map(([id,label,I])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}><I size={15}/>{label}</button>)}</nav><div className="sideCard"><Sparkles size={17}/><b>Autopilot</b><span>Runtime-aware infrastructure recommendations.</span><a href="/login" style={{color:'#cbd3dc',fontSize:11,textDecoration:'none'}}>Account / sign in</a></div></aside>
+<section className="content"><header><div><span className="eyebrow">CONTROL PLANE / PRODUCTION</span><h1>{tab==='overview'?'Deploy the application, not the infrastructure.':tab[0].toUpperCase()+tab.slice(1)}</h1><p>{tab==='overview'?'Frontend, backend, APIs, workers and private services run through one deployment graph with health checks, routing and recovery.':'Manage real Nexus resources from this control plane. Every action below calls the live API.'}</p></div><button onClick={()=>setOpen(true)}><Rocket size={17}/>New deployment</button></header>{message&&<div className="toast"><ShieldCheck size={18}/><span><b>System status</b><small>{message}</small></span><button className="toastClose" onClick={()=>setMessage('')}><X size={14}/></button></div>}
+{tab==='overview'&&<><div className="heroGrid"><div className="heroCard"><div className="status"><i/>{deployments.some(d=>['ready','starting','building'].includes(d.status))?'Runtime activity detected':'Control plane ready'}</div><div className="metric"><strong>{deployments.length}</strong><span>deployments tracked</span></div><div className="graph"><div className="node source"><GitBranch/><b>Source</b><small>{deployments[0]?.repo||'Git or container image'}</small></div><div className="line"/><div className="node"><Globe2/><b>Runtime</b><small>{deployments[0]?.status||'ready'}</small></div><div className="line"/><div className="node"><Database/><b>Data</b><small>connectable</small></div></div></div><div className="insight"><div className="icon"><Sparkles/></div><span className="eyebrow">NEXUS AUTOPILOT</span><h2>One graph. Every workload.</h2><p>Use web services, workers and private services together instead of forcing every workload into a web server.</p><button className="ghost" onClick={()=>setTab('services')}>Explore services <ArrowUpRight size={15}/></button></div></div><SectionHead title="Services" action="View catalog" onClick={()=>setTab('services')}/><ServiceGrid/><DeploymentStream deployments={deployments} onLogs={showLogs}/></>}
+{tab==='projects'&&<Panel title="Projects" description="Projects group services, deployments and domains."><div className="table">{projects.length?projects.map(p=><div className="row" key={p.id}><div><b>{p.name}</b><small>{p.repo||'No Git repository linked'}</small></div><span>{new Date(p.createdAt).toLocaleString()}</span><button className="mini" onClick={()=>{setProjectName(p.name);setRepo(p.repo||'');setOpen(true)}}>Deploy</button></div>):<Empty text="No projects yet. Create your first deployment."/>}</div></Panel>}
+{tab==='services'&&<Panel title="Service catalog" description="Every workload type supported by the deployment engine."><ServiceGrid/><div className="capabilities"><b>Supported build runtimes</b><span>Dockerfile · Node.js · Python · Go · Java Maven · Java Gradle · Rust · .NET · PHP · Ruby</span></div></Panel>}
+{tab==='deployments'&&<Panel title="Deployments" description="Live deployment records returned by the API."><div className="table">{deployments.length?deployments.map(d=><div className="row" key={d.id}><div><b>{d.repo||d.image||'deployment'}</b><small>{d.id}</small></div><strong className={`state ${d.status}`}>{d.status}</strong><span>{new Date(d.createdAt).toLocaleString()}</span><button className="mini" onClick={()=>showLogs(d)}>Logs</button></div>):<Empty text="No deployments yet."/>}</div></Panel>}
+{tab==='domains'&&<Panel title="Domains" description="Register domains and verify DNS before routing production traffic."><div className="table">{domains.length?domains.map(d=><div className="row" key={d.id}><div><b>{d.domain}</b><small>Project {d.projectId.slice(0,8)}…</small></div><strong className={`state ${d.status}`}>{d.status}</strong><button className="mini" disabled={d.status==='verified'} onClick={()=>verifyDomain(d)}>{d.status==='verified'?'Verified':'Verify DNS'}</button></div>):<Empty text="No custom domains registered."/>}</div></Panel>}
+{tab==='observability'&&<Panel title="Observability" description="Inspect deployment state and fetch live build/runtime logs from the engine."><DeploymentStream deployments={deployments} onLogs={showLogs}/></Panel>}
+{logs&&<div className="logsOverlay"><div className="logsPanel"><div className="modalHead"><div><span className="eyebrow">BUILD + RUNTIME LOGS</span><h2>Deployment {logs.id.slice(0,8)}…</h2></div><button className="close" onClick={()=>setLogs(null)}><X size={17}/></button></div><pre>{logs.text}</pre></div></div>}
+{open&&<div className="modalBackdrop"><div className="deployModal"><div className="modalHead"><div><span className="eyebrow">NEW DEPLOYMENT</span><h2>Deploy any application</h2></div><button className="close" onClick={()=>setOpen(false)}><X size={17}/></button></div><label>Project name<input value={projectName} onChange={e=>setProjectName(e.target.value)} placeholder="my-app"/></label>{githubConnected&&githubRepos.length>0&&<label>GitHub repository<select value={repo} onChange={e=>{setRepo(e.target.value);const selected=githubRepos.find(r=>r.cloneUrl===e.target.value);if(selected)setRef(selected.defaultBranch)}}><option value="">Choose a repository…</option>{githubRepos.map(r=><option key={r.fullName} value={r.cloneUrl}>{r.fullName}{r.private?' · private':''}</option>)}</select></label>}<label>Git repository URL <span>{githubConnected?'or paste another repository URL':'connect GitHub to browse your repositories'}</span><input value={repo} onChange={e=>setRepo(e.target.value)} placeholder="https://github.com/owner/repository"/></label>{!githubConnected&&<a href={`${API}/api/auth/github/start`} className="modalNote" style={{display:'block',textDecoration:'none'}}>Connect GitHub → browse personal, collaborator and organization repositories</a>}<div className="formGrid"><label>Service type<select value={serviceType} onChange={e=>setServiceType(e.target.value)}><option value="web">Web / frontend / API</option><option value="worker">Worker</option><option value="private">Private service</option><option value="cron">Cron / job</option></select></label><label>Branch / ref<input value={ref} onChange={e=>setRef(e.target.value)} placeholder="main"/></label></div><div className="formGrid"><label>Container port<input type="number" value={containerPort} onChange={e=>setContainerPort(e.target.value)}/></label><label>Host port<input type="number" value={hostPort} onChange={e=>setHostPort(e.target.value)} disabled={serviceType!=='web'}/></label></div><div className="formGrid"><label>Start command <span>(optional)</span><input value={command} onChange={e=>setCommand(e.target.value)} placeholder="npm start / python app.py"/></label><label>Health path <span>(web only)</span><input value={healthPath} onChange={e=>setHealthPath(e.target.value)} placeholder="/health" disabled={serviceType!=='web'}/></label></div><label>Custom domain <span>(register and verify DNS before deployment)</span><input value={domain} onChange={e=>setDomain(e.target.value)} placeholder="app.example.com" disabled={serviceType!=='web'}/></label><div className="modalNote">Dockerfiles are preferred. Without one, Nexus auto-detects common Node.js, Python, Go, Java, Rust, .NET, PHP and Ruby projects.</div><button className="deployAction" onClick={deploy} disabled={busy}><Rocket size={16}/>{busy?'Deploying…':'Deploy now'}</button></div></div>}</section></main>;
 }
-
 function SectionHead({title,action,onClick}:{title:string;action:string;onClick:()=>void}){return <div className="sectionHead"><div><span className="eyebrow">SERVICES</span><h2>{title}</h2></div><button className="ghost" onClick={onClick}>{action} <ArrowUpRight size={15}/></button></div>}
 function ServiceGrid(){return <div className="services">{services.map(([name,desc,I])=><div className="service" key={name}><div className="serviceTop"><div className="icon"><I/></div><span className="live">AVAILABLE</span></div><h3>{name}</h3><p>{desc}</p><div className="serviceFoot"><span><Activity size={13}/> runtime ready</span><ArrowUpRight size={15}/></div></div>)}</div>}
 function DeploymentStream({deployments,onLogs}:{deployments:Deployment[];onLogs:(d:Deployment)=>void}){return <div className="terminal"><div className="termHead"><span><Terminal size={14}/> live deployment stream</span><span>production / runtime</span></div>{deployments.length?deployments.slice(0,8).map(d=><div key={d.id}><em>{new Date(d.createdAt).toLocaleTimeString()}</em> <b>{d.status.toUpperCase()}</b> {d.repo||d.image||'deployment'} <button className="termButton" onClick={()=>onLogs(d)}>logs</button></div>):<div><em>READY</em> <b>PLAN</b> Runtime catalog loaded</div>}</div>}
