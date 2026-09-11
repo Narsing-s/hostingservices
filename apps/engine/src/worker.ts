@@ -25,24 +25,9 @@ createDeploymentWorker(async (job) => {
     let runtime;
     if (job.data.operation === 'rollback') {
       if (!job.data.previousImage) throw new Error('previousImage is required for rollback');
-      runtime = await rollbackRuntime({
-        name: job.data.name,
-        image: job.data.image,
-        previousImage: job.data.previousImage,
-        containerPort: job.data.containerPort,
-        hostPort: job.data.hostPort,
-        env: job.data.env,
-        healthPath: job.data.healthPath,
-      });
+      runtime = await rollbackRuntime({ name: job.data.name, image: job.data.image, previousImage: job.data.previousImage, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, healthPath: job.data.healthPath });
     } else {
-      runtime = await deployRuntime({
-        name: job.data.name,
-        image: job.data.image,
-        containerPort: job.data.containerPort,
-        hostPort: job.data.hostPort,
-        env: job.data.env,
-        healthPath: job.data.healthPath,
-      });
+      runtime = await deployRuntime({ name: job.data.name, image: job.data.image, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, healthPath: job.data.healthPath });
     }
     await report(deploymentId, 'ready', runtime);
   } catch (error) {
