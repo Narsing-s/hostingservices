@@ -21,14 +21,18 @@ services:
 
   traefik:
     image: traefik:v3.5
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
     command:
       - --configFile=/etc/traefik/traefik.yml
     ports:
       - '80:80'
+      - '443:443'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
       - ./dynamic:/etc/traefik/dynamic:ro
+      - nexus-traefik-letsencrypt:/letsencrypt
     networks: [nexus-runtime]
 
 networks:
@@ -39,3 +43,4 @@ networks:
 volumes:
   nexus-postgres:
   nexus-redis:
+  nexus-traefik-letsencrypt:
