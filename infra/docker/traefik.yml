@@ -8,6 +8,10 @@ entryPoints:
 providers:
   docker:
     exposedByDefault: false
+    network: nexus-runtime
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
 
 log:
   level: INFO
