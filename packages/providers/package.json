@@ -1,0 +1,1 @@
+{"name":"@nexus/providers","private":true,"scripts":{"build":"tsc -p tsconfig.json"},"dependencies":{"dockerode":"latest"},"devDependencies":{"@types/dockerode":"latest","typescript":"latest"}}

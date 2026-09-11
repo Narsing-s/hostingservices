@@ -1,9 +1,39 @@
-import Docker from 'dockerode';
-import http from 'node:http';
-import { buildFromGit } from './build.js';
-const docker=new Docker(); const port=Number(process.env.PORT??4100);
-type DeployBody={name:string;image:string;containerPort?:number;hostPort?:number;env?:Record<string,string>};
-function readBody(req:http.IncomingMessage):Promise<string>{return new Promise((resolve,reject)=>{let b='';req.on('data',c=>b+=c);req.on('end',()=>resolve(b));req.on('error',reject);});}
-async function deploy(body:DeployBody){const name=body.name.replace(/[^a-zA-Z0-9_.-]/g,'-').toLowerCase();try{await docker.getContainer(name).remove({force:true});}catch{};try{await docker.getImage(body.image).inspect();}catch{await new Promise<void>((resolve,reject)=>docker.pull(body.image,(err,s)=>{if(err||!s)return reject(err);docker.modem.followProgress(s,e=>e?reject(e):resolve());}));};const p=body.containerPort??80;const bindings=body.hostPort?{[`${p}/tcp`]:[{HostPort:String(body.hostPort)}]}:undefined;const c=await docker.createContainer({name,image:body.image,Env:Object.entries(body.env??{}).map(([k,v])=>`${k}=${v}`),ExposedPorts:{[`${p}/tcp`]:{}},HostConfig:{PortBindings:bindings,restartPolicy:{Name:'unless-stopped'}}});await c.start();return {id:c.id,name,image:body.image,status:'running',port:body.hostPort??null};}
-async function main(req:http.IncomingMessage,res:http.ServerResponse){res.setHeader('content-type','application/json');try{if(req.url==='/health'){res.end(JSON.stringify({ok:true,docker:!!(await docker.ping())}));return;}if(req.url==='/api/v1/runtime/containers'){res.end(JSON.stringify(await docker.listContainers({all:true})));return;}if(req.url==='/api/v1/runtime/deploy'&&req.method==='POST'){const b=JSON.parse(await readBody(req)) as DeployBody;if(!b.name||!b.image){res.statusCode=400;res.end(JSON.stringify({error:'name and image are required'}));return;}res.statusCode=201;res.end(JSON.stringify(await deploy(b)));return;}if(req.url==='/api/v1/runtime/build'&&req.method==='POST'){const b=JSON.parse(await readBody(req));if(!b.repo||!b.image){res.statusCode=400;res.end(JSON.stringify({error:'repo and image are required'}));return;}res.end(JSON.stringify(await buildFromGit(b)));return;}if(req.url?.startsWith('/api/v1/runtime/logs/')){const name=decodeURIComponent(req.url.split('/').pop()!);const logs=await docker.getContainer(name).logs({stdout:true,stderr:true,tail:200});res.end(JSON.stringify({name,logs:logs.toString()}));return;}res.statusCode=404;res.end(JSON.stringify({error:'Not found'}));}catch(e){res.statusCode=500;res.end(JSON.stringify({error:String(e)}));}}
-http.createServer(main).listen(port,'0.0.0.0',()=>console.log(`Nexus engine listening on ${port}`));
+import Fastify from 'fastify';
+import { randomUUID } from 'node:crypto';
+import { DockerProvider } from '../../../packages/providers/src/index';
+import type { DeploymentRecord, DeploymentRequest } from '../../../packages/contracts/src/deployment';
+
+const app = Fastify({ logger: true });
+const provider = new DockerProvider();
+const deployments = new Map<string, DeploymentRecord>();
+
+app.get('/health', async () => ({ ok: true, service: 'nexus-engine' }));
+
+app.post<{ Body: DeploymentRequest }>('/deployments', async (request, reply) => {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+  const record: DeploymentRecord = { ...request.body, id, status: 'queued', createdAt: now, updatedAt: now };
+  deployments.set(id, record);
+  try {
+    record.status = 'starting';
+    record.updatedAt = new Date().toISOString();
+    const result = await provider.deploy(record);
+    Object.assign(record, result, { status: 'healthy', updatedAt: new Date().toISOString() });
+    return reply.code(202).send(record);
+  } catch (error) {
+    record.status = 'failed';
+    record.error = error instanceof Error ? error.message : String(error);
+    record.updatedAt = new Date().toISOString();
+    return reply.code(500).send(record);
+  }
+});
+
+app.get<{ Params: { id: string } }>('/deployments/:id', async (request, reply) => {
+  const deployment = deployments.get(request.params.id);
+  return deployment ? reply.send(deployment) : reply.code(404).send({ error: 'Deployment not found' });
+});
+
+app.listen({ port: Number(process.env.PORT ?? 4100), host: '0.0.0.0' }).catch((error) => {
+  app.log.error(error);
+  process.exit(1);
+});

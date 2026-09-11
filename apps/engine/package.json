@@ -1,4 +1,1 @@
-{
-  "name":"nexus-engine","private":true,"scripts":{"dev":"tsx src/index.ts","build":"tsc","start":"node dist/index.js"},
-  "dependencies":{"dockerode":"latest","tsx":"latest"},"devDependencies":{"@types/node":"latest","typescript":"latest","@types/dockerode":"latest"}
-}
+{"name":"@nexus/engine","private":true,"scripts":{"dev":"tsx watch src/index.ts","build":"tsc -p tsconfig.json","start":"node dist/index.js"},"dependencies":{"@fastify/cors":"latest","fastify":"latest","dockerode":"latest"},"devDependencies":{"@types/dockerode":"latest","tsx":"latest","typescript":"latest"}}
