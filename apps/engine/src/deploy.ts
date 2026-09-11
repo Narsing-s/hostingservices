@@ -1,6 +1,6 @@
 import Docker from 'dockerode';
 import { waitForHealthyContainer } from './health.js';
-import { switchTraffic, runtimeHost } from './router.js';
+import { switchTraffic } from './router.js';
 
 export type RuntimeSpec = {
   name: string;
@@ -19,8 +19,13 @@ function dockerClient() {
 
 async function ensureNetwork(docker: Docker) {
   const name = process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime';
-  try { return docker.getNetwork(name); } catch { /* create below */ }
-  try { return await docker.createNetwork({ Name: name, Driver: 'bridge' }); } catch { return docker.getNetwork(name); }
+  const existing = docker.getNetwork(name);
+  try {
+    await existing.inspect();
+    return existing;
+  } catch {
+    return docker.createNetwork({ Name: name, Driver: 'bridge' });
+  }
 }
 
 async function removeContainer(docker: Docker, name: string) {
@@ -33,22 +38,17 @@ async function removeContainer(docker: Docker, name: string) {
 
 async function createAndStart(docker: Docker, spec: RuntimeSpec, containerName: string, hostPort: number) {
   const port = spec.containerPort ?? 80;
-  const network = await ensureNetwork(docker);
-  const portBindings = hostPort > 0 ? { [`${port}/tcp`]: [{ HostPort: String(hostPort) }] } : { [`${port}/tcp`]: [{ HostPort: '' }] };
+  await ensureNetwork(docker);
+  const networkName = process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime';
+  const portBindings = { [`${port}/tcp`]: [{ HostPort: String(hostPort > 0 ? hostPort : '') }] };
   const container = await docker.createContainer({
     name: containerName,
     Image: spec.image,
     Env: Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`),
     ExposedPorts: { [`${port}/tcp`]: {} },
     HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, PortBindings: portBindings },
-    NetworkingConfig: { EndpointsConfig: { [process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime']: {} } },
-    Labels: {
-      'nexus.managed': 'true',
-      'nexus.runtime': spec.name,
-      'nexus.deployment-container': containerName,
-      'traefik.enable': 'false',
-      'traefik.docker.network': network.id,
-    },
+    NetworkingConfig: { EndpointsConfig: { [networkName]: {} } },
+    Labels: { 'nexus.managed': 'true', 'nexus.runtime': spec.name, 'nexus.deployment-container': containerName, 'traefik.enable': 'false' },
   });
   await container.start();
   return container;
@@ -79,30 +79,17 @@ export async function deployRuntime(spec: RuntimeSpec) {
       previousExists = true;
     } catch { /* first deployment */ }
 
-    // The candidate always gets an ephemeral host port so it can be tested while
-    // the active deployment remains online. Traefik routes over the shared network.
     const candidateHostPort = proxyEnabled ? 0 : (previousExists ? 0 : requestedHostPort);
     candidate = await createAndStart(docker, spec, candidateName, candidateHostPort);
     const actualCandidatePort = await inspectHostPort(candidate, port);
-    const healthUrl = spec.healthPath && actualCandidatePort
-      ? `http://127.0.0.1:${actualCandidatePort}${spec.healthPath}`
-      : undefined;
+    const healthUrl = spec.healthPath && actualCandidatePort ? `http://127.0.0.1:${actualCandidatePort}${spec.healthPath}` : undefined;
     const health = await waitForHealthyContainer(candidateName, { httpUrl: healthUrl });
 
     if (proxyEnabled) {
       const route = await switchTraffic(spec.name, candidateName, port, spec.healthPath);
-      // Traefik watches the dynamic file and switches the host rule to the healthy candidate.
       if (previousExists) await removeContainer(docker, previousName);
       await docker.getContainer(candidateName).rename({ name: previousName });
-      return {
-        id: candidate.id,
-        name: previousName,
-        url: route.url,
-        host: route.host,
-        health,
-        replacedContainerId: previousId,
-        candidateHealth: health,
-      };
+      return { id: candidate.id, name: previousName, url: route.url, host: route.host, health, replacedContainerId: previousId, candidateHealth: health };
     }
 
     if (previousExists) {
