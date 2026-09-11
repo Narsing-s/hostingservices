@@ -5,6 +5,7 @@ import { resolveTxt } from 'node:dns/promises';
 import { z } from 'zod';
 import { createDeployment, createProject, findProjectByRepo, getDomain, getVerifiedDomain, initDb, listDeployments, listDomains, listProjects, markDomainVerified, projectExists, createDomain, updateDeployment } from './db.js';
 import { registerAuthRoutes } from './auth-routes.js';
+import { registerDeploymentHistoryRoutes } from './deployment-history.js';
 const app=Fastify({logger:true});
 await app.register(cors,{origin:true,credentials:true});
 const ENGINE_URL=process.env.ENGINE_URL??'http://localhost:4100';
@@ -14,8 +15,9 @@ const domainPattern=/^(?=.{1,253}$)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])
 const commandSchema=z.array(z.string().min(1).max(2000)).max(32).optional();
 const serviceSchema=z.string().min(1).max(100).regex(/^[a-zA-Z0-9._-]+$/).optional();
 app.get('/health',async()=>({ok:true,service:'nexus-api',engine:ENGINE_URL,timestamp:new Date().toISOString()}));
-app.get('/api/v1/capabilities',async()=>({ok:true,serviceTypes:['web','worker','cron','private'],sourceTypes:['git','image'],runtimes:['Dockerfile','Node.js','Python','Go','Java Maven','Java Gradle','Rust','.NET','PHP','Ruby'],features:['custom-domains','tls','health-checks','zero-downtime-web-deploys','workers','private-services','rollback','logs','github-webhooks','email-auth','github-oauth','google-oauth','github-repository-browser','monorepo-service-selection','repository-service-discovery']}));
+app.get('/api/v1/capabilities',async()=>({ok:true,serviceTypes:['web','worker','cron','private'],sourceTypes:['git','image'],runtimes:['Dockerfile','Node.js','Python','Go','Java Maven','Java Gradle','Rust','.NET','PHP','Ruby'],features:['custom-domains','tls','health-checks','zero-downtime-web-deploys','workers','private-services','rollback','logs','github-webhooks','email-auth','github-oauth','google-oauth','github-repository-browser','monorepo-service-selection','repository-service-discovery','deployment-history','targeted-rollback']}));
 await registerAuthRoutes(app);
+await registerDeploymentHistoryRoutes(app);
 app.get('/api/v1/projects',async()=>listProjects());
 app.post('/api/v1/projects',async(req,reply)=>{const body=z.object({name:z.string().min(1).max(100),repo:z.string().url().optional()}).parse(req.body);const project={id:randomUUID(),...body,createdAt:new Date().toISOString()};await createProject(project);return reply.code(201).send(project);});
 app.get('/api/v1/deployments',async()=>listDeployments());
