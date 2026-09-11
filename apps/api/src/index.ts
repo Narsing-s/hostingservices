@@ -1,28 +1,27 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import { z } from 'zod';
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
 
-const projects = new Map<string, { id:string; name:string; repo?:string; createdAt:string }>();
-const deployments = new Map<string, { id:string; projectId:string; status:string; createdAt:string }>();
+type Project={id:string;name:string;repo?:string;createdAt:string};
+type Deployment={id:string;projectId:string;status:'queued'|'building'|'ready'|'failed';createdAt:string};
+const projects=new Map<string,Project>();
+const deployments=new Map<string,Deployment>();
 
-app.get('/health', async () => ({ ok:true, service:'nexus-api', timestamp:new Date().toISOString() }));
-app.get('/api/v1/projects', async () => [...projects.values()]);
-app.post<{Body:{name:string;repo?:string}}>('/api/v1/projects', async (req, reply) => {
-  const id = crypto.randomUUID();
-  const project = { id, name:req.body.name, repo:req.body.repo, createdAt:new Date().toISOString() };
-  projects.set(id, project);
-  return reply.code(201).send(project);
+app.get('/health',async()=>({ok:true,service:'nexus-api',timestamp:new Date().toISOString()}));
+app.get('/api/v1/projects',async()=>[...projects.values()]);
+app.post('/api/v1/projects',async(req,reply)=>{
+ const body=z.object({name:z.string().min(1),repo:z.string().url().optional()}).parse(req.body);
+ const project={id:crypto.randomUUID(),...body,createdAt:new Date().toISOString()}; projects.set(project.id,project); return reply.code(201).send(project);
 });
-app.get('/api/v1/deployments', async () => [...deployments.values()]);
-app.post<{Body:{projectId:string}}>('/api/v1/deployments', async (req, reply) => {
-  if (!projects.has(req.body.projectId)) return reply.code(404).send({ error:'Project not found' });
-  const id = crypto.randomUUID();
-  const deployment = { id, projectId:req.body.projectId, status:'queued', createdAt:new Date().toISOString() };
-  deployments.set(id, deployment);
-  return reply.code(202).send(deployment);
+app.get('/api/v1/deployments',async()=>[...deployments.values()]);
+app.post('/api/v1/deployments',async(req,reply)=>{
+ const {projectId}=z.object({projectId:z.string()}).parse(req.body);
+ if(!projects.has(projectId)) return reply.code(404).send({error:'Project not found'});
+ const d:Deployment={id:crypto.randomUUID(),projectId,status:'queued',createdAt:new Date().toISOString()}; deployments.set(d.id,d);
+ return reply.code(202).send(d);
 });
 
-const port = Number(process.env.PORT ?? 4000);
-await app.listen({ host:'0.0.0.0', port });
+await app.listen({host:'0.0.0.0',port:Number(process.env.PORT??4000)});
