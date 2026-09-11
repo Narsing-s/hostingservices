@@ -18,5 +18,12 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on: [postgres, redis]
+  api:
+    build: ./apps/api
+    environment:
+      PORT: 4000
+      ENGINE_URL: http://engine:4100
+    ports: ["4000:4000"]
+    depends_on: [engine]
 volumes:
   nexus-postgres:
