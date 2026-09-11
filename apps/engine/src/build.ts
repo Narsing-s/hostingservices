@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 export type BuildRequest = { repo: string; ref?: string; image: string; deploymentId?: string; service?: string };
+export type DetectRequest = { repo: string; ref?: string; service?: string };
 const buildLogs = new Map<string, string>();
 const maxLogSize = 2_000_000;
 
@@ -46,8 +47,6 @@ async function detectDockerfile(dir: string, requestedService?: string): Promise
   const rootDockerfile = path.join(dir, 'Dockerfile');
   if (await exists(rootDockerfile)) return { generated: false, kind: 'dockerfile', contextDir: dir, dockerfilePath: rootDockerfile };
 
-  // Monorepo support: discover first-level application directories that contain their
-  // own Dockerfile. This is common in Render/Railway-style repositories.
   const entries = await readdir(dir, { withFileTypes: true });
   const candidates: Array<{ name: string; contextDir: string; dockerfilePath: string }> = [];
   for (const entry of entries) {
@@ -110,6 +109,23 @@ async function detectDockerfile(dir: string, requestedService?: string): Promise
   throw new Error('No supported application detected. Add a Dockerfile or use a supported Node.js, Python, Go, Java, Rust, .NET, PHP or Ruby project. For monorepos, place a Dockerfile in the service directory or specify the service.');
 }
 
+async function cloneRepository(request: { repo: string; ref?: string }, deploymentId?: string) {
+  const dir = await mkdtemp(path.join(tmpdir(), 'nexus-build-'));
+  const cloneArgs = ['clone', '--depth', '1']; if (request.ref) cloneArgs.push('--branch', request.ref); cloneArgs.push(request.repo, dir);
+  appendLog(deploymentId, '$ git clone ' + request.repo + '\n');
+  await run('git', cloneArgs, { timeout: 120000, deploymentId });
+  appendLog(deploymentId, '\n✓ Source downloaded\n');
+  return dir;
+}
+
+export async function detectFromGit(request: DetectRequest) {
+  const dir = await cloneRepository(request);
+  try {
+    const detected = await detectDockerfile(dir, request.service);
+    return { runtime: detected.kind, service: detected.service, availableServices: detected.availableServices ?? [], dockerfileGenerated: detected.generated, selectedService: detected.service ?? null };
+  } finally { await rm(dir, { recursive: true, force: true }); }
+}
+
 export async function buildFromGit(request: BuildRequest) {
   const dir = await mkdtemp(path.join(tmpdir(), 'nexus-build-'));
   clearBuildLogs(request.deploymentId ?? '');
@@ -122,9 +138,7 @@ export async function buildFromGit(request: BuildRequest) {
     const detected = await detectDockerfile(dir, request.service);
     const serviceSuffix = detected.service ? ` [service=${detected.service}]` : '';
     appendLog(request.deploymentId, `✓ Runtime detected: ${detected.kind}${detected.generated ? ' (Dockerfile generated)' : ''}${serviceSuffix}\n`);
-    if (detected.availableServices && detected.availableServices.length > 1) {
-      appendLog(request.deploymentId, `  Available services: ${detected.availableServices.join(', ')}\n`);
-    }
+    if (detected.availableServices && detected.availableServices.length > 1) appendLog(request.deploymentId, `  Available services: ${detected.availableServices.join(', ')}\n`);
     appendLog(request.deploymentId, `\n$ docker build --pull -f ${detected.dockerfilePath} -t ${request.image} ${detected.contextDir}\n`);
     await run('docker', ['build', '--pull', '-f', detected.dockerfilePath, '-t', request.image, detected.contextDir], { timeout: 900000, deploymentId: request.deploymentId });
     appendLog(request.deploymentId, `\n✓ Build completed: ${request.image}\n`);
