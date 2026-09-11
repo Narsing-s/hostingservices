@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import { createHmac, timingSafeEqual, randomUUID, randomBytes } from 'node:crypto';
 import { resolveTxt } from 'node:dns/promises';
 import { z } from 'zod';
-import { createDeployment, createProject, findProjectByRepo, getDomain, getVerifiedDomain, initDb, listDeployments, listDomains, listProjects, markDomainVerified, projectExists, createDomain, updateDeployment } from './db.js';
+import { createDeployment, createProject, findProjectByRepo, getDomain, getVerifiedDomain, initDb, listDeployments, listDomains, markDomainVerified, projectExists, createDomain, updateDeployment } from './db.js';
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -28,7 +28,7 @@ app.post('/api/v1/deployments/:id/status', async (req, reply) => { if (ENGINE_CA
 
 app.post('/api/v1/deployments', async (req, reply) => {
   const body = z.object({
-    projectId: z.string(), repo: z.string().url().optional(), ref: z.string().min(1).default('main'), image: z.string().min(1).optional(), serviceType: z.enum(['web', 'worker', 'cron', 'private']).default('web'), command: commandSchema, public: z.boolean().optional(), healthMode: z.enum(['auto', 'http', 'docker', 'process']).optional(), hostPort: z.number().int().min(1).max(65535).optional(), containerPort: z.number().int().min(1).max(65535).default(80), healthPath: z.string().startsWith('/').max(200).optional(), domain: z.string().regex(domainPattern).transform((value) => value.toLowerCase().replace(/\.$/, '')).optional(), env: z.record(z.string()).optional(),
+    projectId: z.string(), repo: z.string().url().optional(), ref: z.string().min(1).default('main'), image: z.string().min(1).optional(), serviceType: z.enum(['web', 'worker', 'cron', 'private']).default('web'), command: commandSchema, public: z.boolean().optional(), healthMode: z.enum(['auto', 'http', 'docker', 'process']).optional(), hostPort: z.number().int().min(1).max(65535).optional(), containerPort: z.number().int().min(1).max(65535).default(80), healthPath: z.string().startsWith('/').max(200).optional(), domain: z.string().regex(domainPattern).transform((value) => value.toLowerCase().replace(/\.$/, '')).optional(), env: z.record(z.string(), z.string()).optional(),
   }).parse(req.body);
   if (!(await projectExists(body.projectId))) return reply.code(404).send({ error: 'Project not found' });
   if (!body.repo && !body.image) return reply.code(400).send({ error: 'repo or image is required' });
