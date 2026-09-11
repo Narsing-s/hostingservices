@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {"dev":"tsx src/index.ts","build":"tsc","start":"node dist/index.js"},
-  "dependencies": {"@fastify/cors":"latest","@fastify/swagger":"latest","fastify":"latest","pg":"latest","zod":"latest"},
+  "dependencies": {"@fastify/cors":"latest","@fastify/raw-body":"latest","@fastify/swagger":"latest","fastify":"latest","pg":"latest","zod":"latest"},
   "devDependencies": {"@types/node":"latest","@types/pg":"latest","tsx":"latest","typescript":"latest"}
 }
