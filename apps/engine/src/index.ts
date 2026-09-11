@@ -1,6 +1,6 @@
 import Docker from 'dockerode';
 import http from 'node:http';
-import { buildFromGit } from './build.js';
+import { buildFromGit, getBuildLogs } from './build.js';
 import { enqueueDeployment, queueStats } from './redis-queue.js';
 
 const docker = process.platform === 'win32' ? new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' }) : new Docker({ socketPath: process.env.DOCKER_SOCKET ?? '/var/run/docker.sock' });
@@ -16,6 +16,7 @@ async function main(req: http.IncomingMessage, res: http.ServerResponse) {
     if (req.url === '/health') { send(res, 200, { ok: true, docker: await docker.ping(), queue: await queueStats() }); return; }
     if (req.url === '/api/v1/queue') { send(res, 200, await queueStats()); return; }
     if (req.url === '/api/v1/runtime/containers') { send(res, 200, await docker.listContainers({ all: true })); return; }
+    if (req.url?.startsWith('/api/v1/runtime/build-logs/')) { const deploymentId = decodeURIComponent(req.url.split('/').pop()!); send(res, 200, { deploymentId, logs: getBuildLogs(deploymentId) }); return; }
     if ((req.url === '/api/v1/runtime/deploy' || req.url === '/api/v1/runtime/rollback') && req.method === 'POST') {
       const body = JSON.parse(await readBody(req)) as DeployBody; const rollback = req.url.endsWith('/rollback');
       if (!body.name || (!rollback && !body.image) || (rollback && !body.previousImage)) { send(res, 400, { error: rollback ? 'name and previousImage are required' : 'name and image are required' }); return; }
