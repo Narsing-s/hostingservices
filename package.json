@@ -1,7 +1,7 @@
 {
   "name": "nexus-hosting",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "npm run dev --workspace apps/web",
@@ -11,6 +11,7 @@
     "build": "npm run build --workspace apps/web && npm run build --workspace apps/api && npm run build --workspace apps/engine && npm run build --workspace apps/agent && npm run build --workspace @nexus/providers && npm run build --workspace @nexus/secrets",
     "start": "npm run start --workspace apps/web",
     "typecheck": "npm run build --workspace apps/api && npm run build --workspace apps/engine && npm run build --workspace apps/agent",
+    "cli:link": "npm link ./packages/cli",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "infra:logs": "docker compose logs -f"
