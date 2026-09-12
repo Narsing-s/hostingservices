@@ -1,0 +1,53 @@
+name: Infrastructure smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/docker/**'
+      - '.github/workflows/infra-smoke.yml'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Compose
+        run: docker compose -f infra/docker/docker-compose.yml config
+
+      - name: Start runtime dependencies
+        run: docker compose -f infra/docker/docker-compose.yml up -d postgres redis
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            status=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose -f infra/docker/docker-compose.yml ps -q postgres))
+            echo "PostgreSQL health: $status"
+            [ "$status" = "healthy" ] && exit 0
+            sleep 2
+          done
+          docker compose -f infra/docker/docker-compose.yml logs postgres
+          exit 1
+
+      - name: Wait for Redis
+        run: |
+          for i in {1..30}; do
+            status=$(docker inspect --format='{{.State.Health.Status}}' $(docker compose -f infra/docker/docker-compose.yml ps -q redis))
+            echo "Redis health: $status"
+            [ "$status" = "healthy" ] && exit 0
+            sleep 2
+          done
+          docker compose -f infra/docker/docker-compose.yml logs redis
+          exit 1
+
+      - name: Verify dependency responses
+        run: |
+          docker compose -f infra/docker/docker-compose.yml exec -T postgres pg_isready -U nexus -d nexus
+          docker compose -f infra/docker/docker-compose.yml exec -T redis redis-cli ping
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f infra/docker/docker-compose.yml down -v
