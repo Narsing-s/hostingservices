@@ -7,6 +7,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,8 +23,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
       - run: npm --version
       - run: npm install --legacy-peer-deps --force --no-audit --no-fund
       - run: npm run build
-      - name: Validate Docker Compose
+      - name: Validate complete Docker Compose
+        run: docker compose config
+      - name: Validate infrastructure Docker Compose
         run: docker compose -f infra/docker/docker-compose.yml config
