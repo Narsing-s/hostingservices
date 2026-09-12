@@ -9,150 +9,15 @@ export type DetectRequest = { repo: string; ref?: string; service?: string };
 const buildLogs = new Map<string, string>();
 const maxLogSize = 2_000_000;
 
-function appendLog(deploymentId: string | undefined, text: string) {
-  if (!deploymentId) return;
-  const current = buildLogs.get(deploymentId) ?? '';
-  buildLogs.set(deploymentId, (current + text).slice(-maxLogSize));
-}
+function appendLog(deploymentId: string | undefined, text: string) { if (!deploymentId) return; const current = buildLogs.get(deploymentId) ?? ''; buildLogs.set(deploymentId, (current + text).slice(-maxLogSize)); }
 export function getBuildLogs(deploymentId: string) { return buildLogs.get(deploymentId) ?? ''; }
 export function clearBuildLogs(deploymentId: string) { buildLogs.delete(deploymentId); }
-
-async function run(command: string, args: string[], options: { timeout: number; deploymentId?: string }) {
-  return await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    let settled = false;
-    const finish = (error?: Error) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(); };
-    const timer = setTimeout(() => { child.kill(); finish(new Error(`${command} timed out after ${options.timeout}ms`)); }, options.timeout);
-    child.stdout.on('data', (chunk) => appendLog(options.deploymentId, chunk.toString()));
-    child.stderr.on('data', (chunk) => appendLog(options.deploymentId, chunk.toString()));
-    child.on('error', (error) => finish(error));
-    child.on('close', (code) => code === 0 ? finish() : finish(new Error(`${command} exited with code ${code}`)));
-  });
-}
-
+async function run(command: string, args: string[], options: { timeout: number; deploymentId?: string; capture?: boolean }) { return await new Promise<string>((resolve, reject) => { const child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); let settled = false; let stdout = ''; const finish = (error?: Error) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(stdout); }; const timer = setTimeout(() => { child.kill(); finish(new Error(`${command} timed out after ${options.timeout}ms`)); }, options.timeout); child.stdout.on('data', (chunk) => { const text = chunk.toString(); stdout += text; appendLog(options.deploymentId, text); }); child.stderr.on('data', (chunk) => appendLog(options.deploymentId, chunk.toString())); child.on('error', (error) => finish(error)); child.on('close', (code) => code === 0 ? finish() : finish(new Error(`${command} exited with code ${code}`))); }); }
 async function exists(file: string) { try { await access(file); return true; } catch { return false; } }
 async function packageJson(dir: string): Promise<any | undefined> { try { return JSON.parse(await readFile(path.join(dir, 'package.json'), 'utf8')); } catch { return undefined; } }
-
-function nodeDockerfile(pkg: any, outputDir?: 'dist' | 'build') {
-  const manager = pkg?.packageManager?.startsWith('pnpm') ? 'pnpm' : pkg?.packageManager?.startsWith('yarn') ? 'yarn' : 'npm';
-  const install = manager === 'pnpm' ? 'corepack enable && pnpm install --frozen-lockfile' : manager === 'yarn' ? 'corepack enable && yarn install --frozen-lockfile' : 'npm ci --omit=dev || npm install --omit=dev';
-  const build = manager === 'pnpm' ? 'pnpm run build' : manager === 'yarn' ? 'yarn build' : 'npm run build';
-  if (outputDir) return `FROM node:22-bookworm-slim AS build\nWORKDIR /app\nCOPY package*.json ./\nCOPY pnpm-lock.yaml* yarn.lock* package-lock.json* ./\nRUN ${install}\nCOPY . .\nRUN ${build}\nFROM nginx:1.27-alpine\nCOPY --from=build /app/${outputDir} /usr/share/nginx/html\nEXPOSE 80\nCMD ["nginx", "-g", "daemon off;"]\n`;
-  const start = pkg?.scripts?.start ? (manager === 'pnpm' ? 'pnpm start' : manager === 'yarn' ? 'yarn start' : 'npm start') : 'node server.js';
-  return `FROM node:22-bookworm-slim\nWORKDIR /app\nCOPY package*.json ./\nCOPY pnpm-lock.yaml* yarn.lock* package-lock.json* ./\nRUN ${install}\nCOPY . .\n${pkg?.scripts?.build ? `RUN ${build}\n` : ''}ENV NODE_ENV=production\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "${start}"]\n`;
-}
-
+function nodeDockerfile(pkg: any, outputDir?: 'dist' | 'build') { const manager = pkg?.packageManager?.startsWith('pnpm') ? 'pnpm' : pkg?.packageManager?.startsWith('yarn') ? 'yarn' : 'npm'; const install = manager === 'pnpm' ? 'corepack enable && pnpm install --frozen-lockfile' : manager === 'yarn' ? 'corepack enable && yarn install --frozen-lockfile' : 'npm ci --omit=dev || npm install --omit=dev'; const build = manager === 'pnpm' ? 'pnpm run build' : manager === 'yarn' ? 'yarn build' : 'npm run build'; if (outputDir) return `FROM node:22-bookworm-slim AS build\nWORKDIR /app\nCOPY package*.json ./\nCOPY pnpm-lock.yaml* yarn.lock* package-lock.json* ./\nRUN ${install}\nCOPY . .\nRUN ${build}\nFROM nginx:1.27-alpine\nCOPY --from=build /app/${outputDir} /usr/share/nginx/html\nEXPOSE 80\nCMD ["nginx", "-g", "daemon off;"]\n`; const start = pkg?.scripts?.start ? (manager === 'pnpm' ? 'pnpm start' : manager === 'yarn' ? 'yarn start' : 'npm start') : 'node server.js'; return `FROM node:22-bookworm-slim\nWORKDIR /app\nCOPY package*.json ./\nCOPY pnpm-lock.yaml* yarn.lock* package-lock.json* ./\nRUN ${install}\nCOPY . .\n${pkg?.scripts?.build ? `RUN ${build}\n` : ''}ENV NODE_ENV=production\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "${start}"]\n`; }
 type Detection = { generated: boolean; kind: string; contextDir: string; dockerfilePath: string; service?: string; availableServices?: string[] };
-
-async function detectDockerfile(dir: string, requestedService?: string): Promise<Detection> {
-  const rootDockerfile = path.join(dir, 'Dockerfile');
-  if (await exists(rootDockerfile)) return { generated: false, kind: 'dockerfile', contextDir: dir, dockerfilePath: rootDockerfile };
-
-  const entries = await readdir(dir, { withFileTypes: true });
-  const candidates: Array<{ name: string; contextDir: string; dockerfilePath: string }> = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith('.') || ['node_modules', 'dist', 'build'].includes(entry.name)) continue;
-    const contextDir = path.join(dir, entry.name);
-    const dockerfilePath = path.join(contextDir, 'Dockerfile');
-    if (await exists(dockerfilePath)) candidates.push({ name: entry.name, contextDir, dockerfilePath });
-  }
-
-  if (candidates.length) {
-    const selected = requestedService ? candidates.find((candidate) => candidate.name === requestedService) : candidates[0];
-    if (!selected) throw new Error(`Service '${requestedService}' was not found. Available services: ${candidates.map((candidate) => candidate.name).join(', ')}`);
-    if (candidates.length > 1 && !requestedService) {
-      const preferred = candidates.find((candidate) => ['backend', 'api', 'server', 'app'].includes(candidate.name.toLowerCase()));
-      if (preferred) return { generated: false, kind: 'dockerfile-monorepo', contextDir: preferred.contextDir, dockerfilePath: preferred.dockerfilePath, service: preferred.name, availableServices: candidates.map((candidate) => candidate.name) };
-    }
-    return { generated: false, kind: 'dockerfile-monorepo', contextDir: selected.contextDir, dockerfilePath: selected.dockerfilePath, service: selected.name, availableServices: candidates.map((candidate) => candidate.name) };
-  }
-
-  const pkg = await packageJson(dir);
-  if (pkg) {
-    const scripts = pkg.scripts ?? {};
-    const vite = await exists(path.join(dir, 'vite.config.ts')) || await exists(path.join(dir, 'vite.config.js'));
-    const astro = await exists(path.join(dir, 'astro.config.mjs'));
-    const angular = await exists(path.join(dir, 'angular.json'));
-    const staticSite = vite || astro || angular || (!scripts.start && Boolean(scripts.build));
-    const outputDir = angular ? 'dist' : vite || astro ? 'dist' : 'build';
-    await writeFile(rootDockerfile, nodeDockerfile(pkg, staticSite ? outputDir : undefined));
-    return { generated: true, kind: staticSite ? 'node-static' : 'node', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  if (await exists(path.join(dir, 'requirements.txt')) || await exists(path.join(dir, 'pyproject.toml'))) {
-    const hasManage = await exists(path.join(dir, 'manage.py'));
-    const pythonCmd = hasManage ? 'gunicorn ${DJANGO_WSGI_MODULE:-app.wsgi}:application --bind 0.0.0.0:8000' : 'gunicorn ${PYTHON_APP_MODULE:-app}:app --bind 0.0.0.0:8000';
-    await writeFile(rootDockerfile, `FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt* pyproject.toml* poetry.lock* ./\nRUN pip install --no-cache-dir --upgrade pip && if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir .; fi && pip install --no-cache-dir gunicorn\nCOPY . .\nENV PORT=8000\nEXPOSE 8000\nCMD ["sh", "-c", "${pythonCmd}"]\n`);
-    return { generated: true, kind: 'python', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  if (await exists(path.join(dir, 'go.mod'))) {
-    await writeFile(rootDockerfile, `FROM golang:1.24-alpine AS build\nWORKDIR /src\nCOPY go.mod go.sum* ./\nRUN go mod download\nCOPY . .\nRUN CGO_ENABLED=0 go build -o /out/app .\nFROM alpine:3.22\nRUN adduser -D app\nUSER app\nCOPY --from=build /out/app /app\nENV PORT=8080\nEXPOSE 8080\nCMD ["/app"]\n`); return { generated: true, kind: 'go', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  if (await exists(path.join(dir, 'pom.xml'))) {
-    await writeFile(rootDockerfile, `FROM maven:3.9-eclipse-temurin-21 AS build\nWORKDIR /src\nCOPY pom.xml .\nRUN mvn -B -DskipTests dependency:go-offline\nCOPY . .\nRUN mvn -B -DskipTests package\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/target/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-maven', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  if (await exists(path.join(dir, 'build.gradle')) || await exists(path.join(dir, 'build.gradle.kts'))) {
-    await writeFile(rootDockerfile, `FROM gradle:8-jdk21 AS build\nWORKDIR /src\nCOPY . .\nRUN gradle build -x test --no-daemon\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/build/libs/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-gradle', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  if (await exists(path.join(dir, 'Cargo.toml'))) {
-    await writeFile(rootDockerfile, `FROM rust:1.89-alpine AS build\nRUN apk add --no-cache musl-dev\nWORKDIR /src\nCOPY . .\nRUN cargo build --release\nFROM alpine:3.22\nWORKDIR /app\nCOPY --from=build /src/target/release/ /app/\nENV PORT=8080\nEXPOSE 8080\nCMD ["sh", "-c", "\${RUST_BINARY:-app}"]\n`); return { generated: true, kind: 'rust', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  const csproj = entries.find((entry) => entry.name.endsWith('.csproj'))?.name;
-  if (csproj) {
-    await writeFile(rootDockerfile, `FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build\nWORKDIR /src\nCOPY . .\nRUN dotnet publish ${csproj} -c Release -o /out\nFROM mcr.microsoft.com/dotnet/aspnet:9.0\nWORKDIR /app\nCOPY --from=build /out .\nENV ASPNETCORE_URLS=http://+:8080\nEXPOSE 8080\nENTRYPOINT ["dotnet", "${csproj.replace(/\.csproj$/i, '.dll')}"]\n`); return { generated: true, kind: 'dotnet', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  if (await exists(path.join(dir, 'composer.json'))) {
-    await writeFile(rootDockerfile, `FROM composer:2 AS deps\nWORKDIR /app\nCOPY composer.* ./\nRUN composer install --no-dev --prefer-dist --no-interaction --no-progress\nFROM php:8.3-apache\nWORKDIR /var/www/html\nCOPY --from=deps /app/vendor ./vendor\nCOPY . .\nRUN a2enmod rewrite\nEXPOSE 80\n`); return { generated: true, kind: 'php', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  if (await exists(path.join(dir, 'Gemfile'))) {
-    await writeFile(rootDockerfile, `FROM ruby:3.4-slim\nWORKDIR /app\nCOPY Gemfile Gemfile.lock* ./\nRUN bundle install\nCOPY . .\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "\${RUBY_START_COMMAND:-bundle exec rails server -b 0.0.0.0 -p 3000}"]\n`);
-    return { generated: true, kind: 'ruby', contextDir: dir, dockerfilePath: rootDockerfile };
-  }
-  throw new Error('No supported application detected. Add a Dockerfile or use a supported Node.js, Python, Go, Java, Rust, .NET, PHP or Ruby project. For monorepos, place a Dockerfile in the service directory or specify the service.');
-}
-
-async function cloneRepository(request: { repo: string; ref?: string }, deploymentId?: string) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'nexus-build-'));
-  const cloneArgs = ['clone', '--depth', '1']; if (request.ref) cloneArgs.push('--branch', request.ref); cloneArgs.push(request.repo, dir);
-  appendLog(deploymentId, '$ git clone ' + request.repo + '\n');
-  await run('git', cloneArgs, { timeout: 120000, deploymentId });
-  appendLog(deploymentId, '\n✓ Source downloaded\n');
-  return dir;
-}
-
-export async function detectFromGit(request: DetectRequest) {
-  const dir = await cloneRepository(request);
-  try {
-    const detected = await detectDockerfile(dir, request.service);
-    return { runtime: detected.kind, service: detected.service, availableServices: detected.availableServices ?? [], dockerfileGenerated: detected.generated, selectedService: detected.service ?? null };
-  } finally { await rm(dir, { recursive: true, force: true }); }
-}
-
-export async function buildFromGit(request: BuildRequest) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'nexus-build-'));
-  clearBuildLogs(request.deploymentId ?? '');
-  appendLog(request.deploymentId, `$ nexus build ${request.repo} @ ${request.ref ?? 'default'}${request.service ? ` (service: ${request.service})` : ''}\n`);
-  try {
-    const cloneArgs = ['clone', '--depth', '1']; if (request.ref) cloneArgs.push('--branch', request.ref); cloneArgs.push(request.repo, dir);
-    appendLog(request.deploymentId, '$ git clone ' + request.repo + '\n');
-    await run('git', cloneArgs, { timeout: 120000, deploymentId: request.deploymentId });
-    appendLog(request.deploymentId, '\n✓ Source downloaded\n');
-    const detected = await detectDockerfile(dir, request.service);
-    const serviceSuffix = detected.service ? ` [service=${detected.service}]` : '';
-    appendLog(request.deploymentId, `✓ Runtime detected: ${detected.kind}${detected.generated ? ' (Dockerfile generated)' : ''}${serviceSuffix}\n`);
-    if (detected.availableServices && detected.availableServices.length > 1) appendLog(request.deploymentId, `  Available services: ${detected.availableServices.join(', ')}\n`);
-
-    const sandbox = buildSandboxPolicy();
-    const buildArgs = dockerBuildArgs(sandbox, detected.dockerfilePath, request.image, detected.contextDir);
-    appendLog(request.deploymentId, `\n$ docker ${buildArgs.join(' ')}\n`);
-    appendLog(request.deploymentId, `  Build sandbox: network=${sandbox.network}, memory=${sandbox.memory}, cpus=${sandbox.cpus}, pids=${sandbox.pids}, timeout=${sandbox.timeoutMs}ms, no-new-privileges=${sandbox.noNewPrivileges}, cap-drop=ALL\n`);
-    await run('docker', buildArgs, { timeout: sandbox.timeoutMs, deploymentId: request.deploymentId });
-
-    appendLog(request.deploymentId, `\n$ docker image inspect ${request.image}\n`);
-    await run('docker', ['image', 'inspect', request.image], { timeout: 30000, deploymentId: request.deploymentId });
-    appendLog(request.deploymentId, `\n✓ Build completed and image verified: ${request.image}\n`);
-    return { image: request.image, repository: request.repo, ref: request.ref ?? 'default', status: 'built', runtime: detected.kind, dockerfileGenerated: detected.generated, service: detected.service, availableServices: detected.availableServices, sandbox: { network: sandbox.network, memory: sandbox.memory, cpus: sandbox.cpus, pids: sandbox.pids, timeoutMs: sandbox.timeoutMs } };
-  } catch (error) {
-    appendLog(request.deploymentId, `\n✗ BUILD FAILED: ${error instanceof Error ? error.message : String(error)}\n`);
-    throw error;
-  } finally { await rm(dir, { recursive: true, force: true }); }
-}
+async function detectDockerfile(dir: string, requestedService?: string): Promise<Detection> { const rootDockerfile = path.join(dir, 'Dockerfile'); if (await exists(rootDockerfile)) return { generated: false, kind: 'dockerfile', contextDir: dir, dockerfilePath: rootDockerfile }; const entries = await readdir(dir, { withFileTypes: true }); const candidates: Array<{ name: string; contextDir: string; dockerfilePath: string }> = []; for (const entry of entries) { if (!entry.isDirectory() || entry.name.startsWith('.') || ['node_modules', 'dist', 'build'].includes(entry.name)) continue; const contextDir = path.join(dir, entry.name); const dockerfilePath = path.join(contextDir, 'Dockerfile'); if (await exists(dockerfilePath)) candidates.push({ name: entry.name, contextDir, dockerfilePath }); } if (candidates.length) { const selected = requestedService ? candidates.find((candidate) => candidate.name === requestedService) : candidates[0]; if (!selected) throw new Error(`Service '${requestedService}' was not found. Available services: ${candidates.map((candidate) => candidate.name).join(', ')}`); if (candidates.length > 1 && !requestedService) { const preferred = candidates.find((candidate) => ['backend', 'api', 'server', 'app'].includes(candidate.name.toLowerCase())); if (preferred) return { generated: false, kind: 'dockerfile-monorepo', contextDir: preferred.contextDir, dockerfilePath: preferred.dockerfilePath, service: preferred.name, availableServices: candidates.map((candidate) => candidate.name) }; } return { generated: false, kind: 'dockerfile-monorepo', contextDir: selected.contextDir, dockerfilePath: selected.dockerfilePath, service: selected.name, availableServices: candidates.map((candidate) => candidate.name) }; } const pkg = await packageJson(dir); if (pkg) { const scripts = pkg.scripts ?? {}; const vite = await exists(path.join(dir, 'vite.config.ts')) || await exists(path.join(dir, 'vite.config.js')); const astro = await exists(path.join(dir, 'astro.config.mjs')); const angular = await exists(path.join(dir, 'angular.json')); const staticSite = vite || astro || angular || (!scripts.start && Boolean(scripts.build)); const outputDir = angular ? 'dist' : vite || astro ? 'dist' : 'build'; await writeFile(rootDockerfile, nodeDockerfile(pkg, staticSite ? outputDir : undefined)); return { generated: true, kind: staticSite ? 'node-static' : 'node', contextDir: dir, dockerfilePath: rootDockerfile }; } if (await exists(path.join(dir, 'requirements.txt')) || await exists(path.join(dir, 'pyproject.toml'))) { const hasManage = await exists(path.join(dir, 'manage.py')); const pythonCmd = hasManage ? 'gunicorn ${DJANGO_WSGI_MODULE:-app.wsgi}:application --bind 0.0.0.0:8000' : 'gunicorn ${PYTHON_APP_MODULE:-app}:app --bind 0.0.0.0:8000'; await writeFile(rootDockerfile, `FROM python:3.12-slim\nWORKDIR /app\nCOPY requirements.txt* pyproject.toml* poetry.lock* ./\nRUN pip install --no-cache-dir --upgrade pip && if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; else pip install --no-cache-dir .; fi && pip install --no-cache-dir gunicorn\nCOPY . .\nENV PORT=8000\nEXPOSE 8000\nCMD ["sh", "-c", "${pythonCmd}"]\n`); return { generated: true, kind: 'python', contextDir: dir, dockerfilePath: rootDockerfile }; } if (await exists(path.join(dir, 'go.mod'))) { await writeFile(rootDockerfile, `FROM golang:1.24-alpine AS build\nWORKDIR /src\nCOPY go.mod go.sum* ./\nRUN go mod download\nCOPY . .\nRUN CGO_ENABLED=0 go build -o /out/app .\nFROM alpine:3.22\nRUN adduser -D app\nUSER app\nCOPY --from=build /out/app /app\nENV PORT=8080\nEXPOSE 8080\nCMD ["/app"]\n`); return { generated: true, kind: 'go', contextDir: dir, dockerfilePath: rootDockerfile }; } if (await exists(path.join(dir, 'pom.xml'))) { await writeFile(rootDockerfile, `FROM maven:3.9-eclipse-temurin-21 AS build\nWORKDIR /src\nCOPY pom.xml .\nRUN mvn -B -DskipTests dependency:go-offline\nCOPY . .\nRUN mvn -B -DskipTests package\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/target/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-maven', contextDir: dir, dockerfilePath: rootDockerfile }; } if (await exists(path.join(dir, 'build.gradle')) || await exists(path.join(dir, 'build.gradle.kts'))) { await writeFile(rootDockerfile, `FROM gradle:8-jdk21 AS build\nWORKDIR /src\nCOPY . .\nRUN gradle build -x test --no-daemon\nFROM eclipse-temurin:21-jre\nWORKDIR /app\nCOPY --from=build /src/build/libs/*.jar /app/app.jar\nENV PORT=8080\nEXPOSE 8080\nCMD ["java", "-jar", "/app/app.jar"]\n`); return { generated: true, kind: 'java-gradle', contextDir: dir, dockerfilePath: rootDockerfile }; } if (await exists(path.join(dir, 'Cargo.toml'))) { await writeFile(rootDockerfile, `FROM rust:1.89-alpine AS build\nRUN apk add --no-cache musl-dev\nWORKDIR /src\nCOPY . .\nRUN cargo build --release\nFROM alpine:3.22\nWORKDIR /app\nCOPY --from=build /src/target/release/ /app/\nENV PORT=8080\nEXPOSE 8080\nCMD ["sh", "-c", "\${RUST_BINARY:-app}"]\n`); return { generated: true, kind: 'rust', contextDir: dir, dockerfilePath: rootDockerfile }; } const csproj = entries.find((entry) => entry.name.endsWith('.csproj'))?.name; if (csproj) { await writeFile(rootDockerfile, `FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build\nWORKDIR /src\nCOPY . .\nRUN dotnet publish ${csproj} -c Release -o /out\nFROM mcr.microsoft.com/dotnet/aspnet:9.0\nWORKDIR /app\nCOPY --from=build /out .\nENV ASPNETCORE_URLS=http://+:8080\nEXPOSE 8080\nENTRYPOINT ["dotnet", "${csproj.replace(/\.csproj$/i, '.dll')}"]\n`); return { generated: true, kind: 'dotnet', contextDir: dir, dockerfilePath: rootDockerfile }; } if (await exists(path.join(dir, 'composer.json'))) { await writeFile(rootDockerfile, `FROM composer:2 AS deps\nWORKDIR /app\nCOPY composer.* ./\nRUN composer install --no-dev --prefer-dist --no-interaction --no-progress\nFROM php:8.3-apache\nWORKDIR /var/www/html\nCOPY --from=deps /app/vendor ./vendor\nCOPY . .\nRUN a2enmod rewrite\nEXPOSE 80\n`); return { generated: true, kind: 'php', contextDir: dir, dockerfilePath: rootDockerfile }; } if (await exists(path.join(dir, 'Gemfile'))) { await writeFile(rootDockerfile, `FROM ruby:3.4-slim\nWORKDIR /app\nCOPY Gemfile Gemfile.lock* ./\nRUN bundle install\nCOPY . .\nENV PORT=3000\nEXPOSE 3000\nCMD ["sh", "-c", "\${RUBY_START_COMMAND:-bundle exec rails server -b 0.0.0.0 -p 3000}"]\n`); return { generated: true, kind: 'ruby', contextDir: dir, dockerfilePath: rootDockerfile }; } throw new Error('No supported application detected. Add a Dockerfile or use a supported Node.js, Python, Go, Java, Rust, .NET, PHP or Ruby project. For monorepos, place a Dockerfile in the service directory or specify the service.'); }
+async function cloneRepository(request: { repo: string; ref?: string }, deploymentId?: string) { const dir = await mkdtemp(path.join(tmpdir(), 'nexus-build-')); const cloneArgs = ['clone', '--depth', '1']; if (request.ref) cloneArgs.push('--branch', request.ref); cloneArgs.push(request.repo, dir); appendLog(deploymentId, '$ git clone ' + request.repo + '\n'); await run('git', cloneArgs, { timeout: 120000, deploymentId }); appendLog(deploymentId, '\n✓ Source downloaded\n'); return dir; }
+export async function detectFromGit(request: DetectRequest) { const dir = await cloneRepository(request); try { const detected = await detectDockerfile(dir, request.service); return { runtime: detected.kind, service: detected.service, availableServices: detected.availableServices ?? [], dockerfileGenerated: detected.generated, selectedService: detected.service ?? null }; } finally { await rm(dir, { recursive: true, force: true }); } }
+export async function buildFromGit(request: BuildRequest) { const dir = await mkdtemp(path.join(tmpdir(), 'nexus-build-')); clearBuildLogs(request.deploymentId ?? ''); appendLog(request.deploymentId, `$ nexus build ${request.repo} @ ${request.ref ?? 'default'}${request.service ? ` (service: ${request.service})` : ''}\n`); try { const cloneArgs = ['clone', '--depth', '1']; if (request.ref) cloneArgs.push('--branch', request.ref); cloneArgs.push(request.repo, dir); appendLog(request.deploymentId, '$ git clone ' + request.repo + '\n'); await run('git', cloneArgs, { timeout: 120000, deploymentId: request.deploymentId }); appendLog(request.deploymentId, '\n✓ Source downloaded\n'); const sourceCommit = (await run('git', ['-C', dir, 'rev-parse', 'HEAD'], { timeout: 10000, deploymentId: request.deploymentId })).trim(); const detected = await detectDockerfile(dir, request.service); const serviceSuffix = detected.service ? ` [service=${detected.service}]` : ''; appendLog(request.deploymentId, `✓ Source commit: ${sourceCommit}\n`); appendLog(request.deploymentId, `✓ Runtime detected: ${detected.kind}${detected.generated ? ' (Dockerfile generated)' : ''}${serviceSuffix}\n`); if (detected.availableServices && detected.availableServices.length > 1) appendLog(request.deploymentId, `  Available services: ${detected.availableServices.join(', ')}\n`); const sandbox = buildSandboxPolicy(); const buildArgs = dockerBuildArgs(sandbox, detected.dockerfilePath, request.image, detected.contextDir); appendLog(request.deploymentId, `\n$ docker ${buildArgs.join(' ')}\n`); appendLog(request.deploymentId, `  Build sandbox: network=${sandbox.network}, memory=${sandbox.memory}, cpus=${sandbox.cpus}, pids=${sandbox.pids}, timeout=${sandbox.timeoutMs}ms, no-new-privileges=${sandbox.noNewPrivileges}, cap-drop=ALL\n`); await run('docker', buildArgs, { timeout: sandbox.timeoutMs, deploymentId: request.deploymentId }); appendLog(request.deploymentId, `\n$ docker image inspect ${request.image}\n`); const inspectRaw = await run('docker', ['image', 'inspect', '--format', '{{json .}}', request.image], { timeout: 30000, deploymentId: request.deploymentId }); const inspect = JSON.parse(inspectRaw.trim()); const imageId = String(inspect.Id ?? ''); const repoDigests = Array.isArray(inspect.RepoDigests) ? inspect.RepoDigests.map(String) : []; const digest = repoDigests.find((value: string) => value.includes('@sha256:'))?.split('@')[1] ?? null; const createdAt = inspect.Created ? String(inspect.Created) : null; if (!imageId) throw new Error('Docker build completed but no immutable image ID was returned'); appendLog(request.deploymentId, `✓ Immutable image ID: ${imageId}\n`); appendLog(request.deploymentId, digest ? `✓ Registry digest: ${digest}\n` : 'ℹ Registry digest unavailable until image is pushed; image ID is the local immutable artifact identity.\n'); return { image: request.image, imageId, digest, repository: request.repo, ref: request.ref ?? 'default', sourceCommit, createdAt, status: 'built', runtime: detected.kind, dockerfileGenerated: detected.generated, service: detected.service, availableServices: detected.availableServices, sandbox: { network: sandbox.network, memory: sandbox.memory, cpus: sandbox.cpus, pids: sandbox.pids, timeoutMs: sandbox.timeoutMs } }; } catch (error) { appendLog(request.deploymentId, `\n✗ BUILD FAILED: ${error instanceof Error ? error.message : String(error)}\n`); throw error; } finally { await rm(dir, { recursive: true, force: true }); } }
