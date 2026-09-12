@@ -9,7 +9,9 @@ type Inspector = { id: string; project: string; status: string; repo?: string; i
 type Logs = { deploymentId: string; status: string; logs: string };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${API}${path}`, { ...init, credentials: 'include', headers: { ...(init?.body ? { 'content-type': 'application/json' } : {}), ...(init?.headers ?? {}) });
+  const headers = new Headers(init?.headers);
+  if (init?.body) headers.set('content-type', 'application/json');
+  const r = await fetch(`${API}${path}`, { ...init, credentials: 'include', headers });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.detail || body.error || `Request failed (${r.status})`);
   return body as T;
@@ -35,7 +37,7 @@ export default function DeploymentInspectorPage() {
       setLogs(deploymentLogs);
     } catch (e) { setMessage(e instanceof Error ? e.message : 'Unable to load deployment'); }
   }
-  useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, [id]);
+  useEffect(() => { void load(); const t = setInterval(() => void load(), 3000); return () => clearInterval(t); }, [id]);
 
   async function addComment() {
     if (!comment.trim()) return;
