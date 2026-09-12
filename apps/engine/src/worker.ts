@@ -1,5 +1,6 @@
 import { createDeploymentWorker } from './redis-queue.js';
 import { deployRuntime, rollbackRuntime } from './deploy.js';
+import { deployReplicas } from './replicas.js';
 
 const callbackUrl = process.env.ENGINE_CALLBACK_URL ?? 'http://127.0.0.1:4000';
 const callbackSecret = process.env.ENGINE_CALLBACK_SECRET ?? '';
@@ -21,7 +22,11 @@ createDeploymentWorker(async (job) => {
     if (job.data.operation === 'rollback') {
       if (!job.data.previousImage) throw new Error('previousImage is required for rollback');
       runtime = await rollbackRuntime({ ...runtimeSpec, previousImage: job.data.previousImage });
-    } else runtime = await deployRuntime(runtimeSpec);
+    } else if ((job.data.replicas ?? 1) > 1) {
+      runtime = await deployReplicas({ ...runtimeSpec, replicas: job.data.replicas ?? 1 });
+    } else {
+      runtime = await deployRuntime(runtimeSpec);
+    }
     await report(deploymentId, 'ready', runtime);
   } catch (error) {
     const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
