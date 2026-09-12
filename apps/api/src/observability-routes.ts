@@ -1,0 +1,11 @@
+import type {FastifyInstance} from 'fastify';
+import pg from 'pg';
+import {userFromToken} from './auth.js';
+const {Pool}=pg; const pool=new Pool({connectionString:process.env.DATABASE_URL??'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus'});
+function session(req:any){return String(req.headers.cookie??'').split(';').map((x:string)=>x.trim()).find((x:string)=>x.startsWith('nexus_session='))?.slice(14)}
+async function auth(req:any,reply:any){const u=await userFromToken(session(req));if(!u){reply.code(401).send({error:'Authentication required'});return}return u}
+export async function registerObservabilityRoutes(app:FastifyInstance){
+ app.get('/api/v1/projects/:projectId/deployments',async(req,reply)=>{const u=await auth(req,reply);if(!u)return;const {projectId}=req.params as any;const {rows}=await pool.query(`SELECT d.id,d.project_id AS "projectId",d.status,d.image,d.repo,d.runtime,d.created_at AS "createdAt" FROM deployments d JOIN projects p ON p.id=d.project_id JOIN organization_members om ON om.organization_id=p.organization_id WHERE d.project_id=$1 AND om.user_id=$2 ORDER BY d.created_at DESC LIMIT 100`,[projectId,(u as any).id]);return {deployments:rows}});
+ app.get('/api/v1/projects/:projectId/usage',async(req,reply)=>{const u=await auth(req,reply);if(!u)return;const {projectId}=req.params as any;const {rows}=await pool.query(`SELECT metric,unit,SUM(quantity)::numeric AS quantity,COUNT(*)::int AS events FROM usage_events ue JOIN projects p ON p.id=ue.project_id JOIN organization_members om ON om.organization_id=p.organization_id WHERE ue.project_id=$1 AND om.user_id=$2 GROUP BY metric,unit ORDER BY metric`,[projectId,(u as any).id]);return {usage:rows}});
+ app.get('/api/v1/projects/:projectId/activity',async(req,reply)=>{const u=await auth(req,reply);if(!u)return;const {projectId}=req.params as any;const {rows}=await pool.query(`SELECT a.action,a.resource_type AS "resourceType",a.resource_id AS "resourceId",a.metadata,a.created_at AS "createdAt" FROM audit_logs a JOIN projects p ON p.organization_id=a.organization_id JOIN organization_members om ON om.organization_id=a.organization_id WHERE p.id=$1 AND om.user_id=$2 ORDER BY a.created_at DESC LIMIT 100`,[projectId,(u as any).id]);return {activity:rows}});
+}
