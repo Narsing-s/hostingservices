@@ -46,13 +46,17 @@ CREATE TABLE IF NOT EXISTS deployment_artifacts (id uuid PRIMARY KEY,deployment_
 CREATE INDEX IF NOT EXISTS deployment_artifacts_org_created_idx ON deployment_artifacts(organization_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS deployment_artifacts_source_commit_idx ON deployment_artifacts(repository,source_commit);
 CREATE OR REPLACE FUNCTION capture_deployment_artifact() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE artifact jsonb; org_id uuid;
+DECLARE artifact jsonb; org_id uuid; artifact_created timestamptz;
 BEGIN
   artifact := COALESCE(NEW.runtime->'buildProvenance', NEW.runtime->'artifactProvenance', '{}'::jsonb);
   IF artifact ? 'imageId' AND NULLIF(artifact->>'imageId','') IS NOT NULL THEN
     SELECT p.organization_id INTO org_id FROM projects p WHERE p.id=NEW.project_id;
+    artifact_created := NOW();
+    IF NULLIF(artifact->>'createdAt','') IS NOT NULL THEN
+      BEGIN artifact_created := (artifact->>'createdAt')::timestamptz; EXCEPTION WHEN OTHERS THEN artifact_created := NOW(); END;
+    END IF;
     INSERT INTO deployment_artifacts(id,deployment_id,organization_id,repository,ref,source_commit,image,image_id,digest,created_at)
-    VALUES(gen_random_uuid(),NEW.id,org_id,NULLIF(artifact->>'repository',''),NULLIF(artifact->>'ref',''),NULLIF(artifact->>'sourceCommit',''),COALESCE(NULLIF(artifact->>'image',''),NEW.image),artifact->>'imageId',NULLIF(artifact->>'digest',''),COALESCE(NULLIF(artifact->>'createdAt','')::timestamptz,NOW()))
+    VALUES(NEW.id,NEW.id,org_id,NULLIF(artifact->>'repository',''),NULLIF(artifact->>'ref',''),NULLIF(artifact->>'sourceCommit',''),COALESCE(NULLIF(artifact->>'image',''),NEW.image),artifact->>'imageId',NULLIF(artifact->>'digest',''),artifact_created)
     ON CONFLICT(deployment_id) DO UPDATE SET organization_id=EXCLUDED.organization_id,repository=EXCLUDED.repository,ref=EXCLUDED.ref,source_commit=EXCLUDED.source_commit,image=EXCLUDED.image,image_id=EXCLUDED.image_id,digest=EXCLUDED.digest,created_at=EXCLUDED.created_at;
   END IF;
   RETURN NEW;
