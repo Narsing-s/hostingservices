@@ -1,1 +1,15 @@
-{"name":"@nexus/database","private":true,"scripts":{"generate":"prisma generate","migrate":"prisma migrate dev","studio":"prisma studio"},"dependencies":{"@prisma/client":"latest"},"devDependencies":{"prisma":"latest"}}
+{
+  "name": "@nexus/database",
+  "private": true,
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate dev",
+    "studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "7.10.0"
+  },
+  "devDependencies": {
+    "prisma": "7.10.0"
+  }
+}
