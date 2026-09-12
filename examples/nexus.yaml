@@ -16,9 +16,14 @@ service:
       path: /health
       mode: auto
   deploy:
-    replicas: 1
+    replicas: 2
     zeroDowntime: true
     rollbackOnFailure: true
+    autoscale:
+      min: 2
+      max: 6
+      cpuPercent: 70
+      intervalSeconds: 30
 
 env:
   NODE_ENV: production
