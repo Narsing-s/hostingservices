@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import rawBody from '@fastify/raw-body';
+import rawBody from 'fastify-raw-body';
 import { createHmac, timingSafeEqual, randomUUID, randomBytes } from 'node:crypto';
 import { resolveTxt } from 'node:dns/promises';
 import { z } from 'zod';
