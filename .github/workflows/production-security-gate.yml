@@ -1,0 +1,55 @@
+name: Production Security Gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  security-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check repository whitespace
+        run: git diff --check
+
+      - name: High severity dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Reject insecure production defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden=(
+            'change-this-secret'
+            'local-auth-secret-change-before-production'
+            'local-engine-internal-secret'
+            'local-engine-callback-secret'
+          )
+          for value in "${forbidden[@]}"; do
+            if grep -R --exclude-dir=.git --exclude-dir=node_modules --exclude='*.lock' -nF "$value" .; then
+              echo "Forbidden production default detected: $value"
+              exit 1
+            fi
+          done
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Contract tests
+        run: npm run test:platform
