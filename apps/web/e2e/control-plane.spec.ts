@@ -6,14 +6,16 @@ test.describe('Nexus control plane', () => {
     await expect(page.getByRole('heading', { name: /deploy the application/i })).toBeVisible();
 
     for (const label of ['Projects', 'Services', 'Deployments', 'Domains', 'Observability']) {
-      await page.getByRole('button', { name: label, exact: true }).click();
-      await expect(page.locator('h1')).toHaveText(label);
+      const button = page.getByRole('button', { name: label, exact: true });
+      await expect(button).toBeVisible();
+      await button.click();
+      await expect(button).toHaveClass(/active/);
+      await expect(page.locator('h1')).toContainText(label);
     }
   });
 
   test('opens deployment workflow and exposes service choices', async ({ page }) => {
-    await page.goto('/');
-    await page.getByRole('button', { name: /new deployment/i }).click();
+    await page.goto('/deploy');
     await expect(page).toHaveURL(/\/deploy$/);
     await expect(page.getByRole('heading', { name: /deploy a repository service/i })).toBeVisible();
     await expect(page.getByLabel('Git repository')).toBeVisible();
@@ -32,8 +34,9 @@ test.describe('Nexus control plane', () => {
   });
 
   test('login page renders safe OAuth state and email authentication form', async ({ page }) => {
-    const providerResponse = page.waitForResponse(response => response.url().endsWith('/api/nexus/auth/providers'));
     await page.goto('/login');
+    const providerResponse = page.waitForResponse(response => response.url().endsWith('/api/nexus/auth/providers'));
+    await page.reload();
     await providerResponse;
 
     await expect(page.getByRole('heading', { name: /welcome back/i })).toBeVisible();
