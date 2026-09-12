@@ -1,8 +1,9 @@
 import pg from 'pg';
+import { ensureMarketSchema } from './market-schema.js';
 const {Pool}=pg;
 const pool=new Pool({connectionString:process.env.DATABASE_URL??'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus'});
 
-export async function ensureQuotaSchema(){await pool.query(`CREATE TABLE IF NOT EXISTS organization_quotas(organization_id uuid PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,max_services integer NOT NULL DEFAULT 25,max_projects integer NOT NULL DEFAULT 10,max_runtime_cpu_millis integer NOT NULL DEFAULT 4000,max_runtime_memory_bytes bigint NOT NULL DEFAULT 4294967296,max_storage_bytes bigint NOT NULL DEFAULT 107374182400,max_members integer NOT NULL DEFAULT 10,updated_at timestamptz NOT NULL DEFAULT now());`)}
+export async function ensureQuotaSchema(){await pool.query(`CREATE TABLE IF NOT EXISTS organization_quotas(organization_id uuid PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,max_services integer NOT NULL DEFAULT 25,max_projects integer NOT NULL DEFAULT 10,max_runtime_cpu_millis integer NOT NULL DEFAULT 4000,max_runtime_memory_bytes bigint NOT NULL DEFAULT 4294967296,max_storage_bytes bigint NOT NULL DEFAULT 107374182400,max_members integer NOT NULL DEFAULT 10,updated_at timestamptz NOT NULL DEFAULT now());`);await ensureMarketSchema()}
 export async function ensureDefaultQuota(orgId:string){await pool.query(`INSERT INTO organization_quotas(organization_id) VALUES($1) ON CONFLICT DO NOTHING`,[orgId])}
 export async function quotaFor(orgId:string){await ensureDefaultQuota(orgId);const {rows}=await pool.query(`SELECT * FROM organization_quotas WHERE organization_id=$1`,[orgId]);return rows[0]}
 export async function assertServiceQuota(orgId:string){const q=await quotaFor(orgId);const {rows}=await pool.query(`SELECT COUNT(*)::int AS count FROM services s JOIN environments e ON e.id=s.environment_id JOIN projects p ON p.id=e.project_id WHERE p.organization_id=$1`,[orgId]);if(rows[0].count>=q.max_services)throw new Error(`Service quota exceeded (${q.max_services})`)}
