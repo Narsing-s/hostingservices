@@ -11,7 +11,7 @@ function validDomain(value: string) { return /^(?=.{1,253}$)([a-zA-Z0-9](?:[a-zA
 
 export function runtimeHost(name: string) { return `${safe(name)}.${publicDomain}`; }
 
-export async function switchTraffic(name: string, containerName: string, containerPort: number, healthPath?: string, domain?: string) {
+export async function switchTraffic(name: string, containerName: string | string[], containerPort: number, healthPath?: string, domain?: string) {
   await fs.mkdir(dynamicDir, { recursive: true });
   const id = safe(name);
   const host = domain && validDomain(domain) ? domain : runtimeHost(name);
@@ -21,12 +21,14 @@ export async function switchTraffic(name: string, containerName: string, contain
   const tls = tlsEnabled ? `\n      tls:\n        certResolver: ${certResolver}` : '';
   const entryPoints = tlsEnabled ? '        - websecure' : '        - web';
   const scheme = tlsEnabled ? 'https' : 'http';
-  const config = `http:\n  routers:\n    ${router}:\n      entryPoints:\n${entryPoints}\n      rule: "Host(\`${host}\`)"\n      service: ${service}${tls}\n  services:\n    ${service}:\n      loadBalancer:\n        servers:\n          - url: "http://${containerName}:${containerPort}"${health}\n`;
+  const names = Array.isArray(containerName) ? containerName : [containerName];
+  const servers = names.map((container) => `          - url: "http://${container}:${containerPort}"`).join('\n');
+  const config = `http:\n  routers:\n    ${router}:\n      entryPoints:\n${entryPoints}\n      rule: "Host(\`${host}\`)"\n      service: ${service}${tls}\n  services:\n    ${service}:\n      loadBalancer:\n        servers:\n${servers}${health}\n`;
   const target = path.join(dynamicDir, `${id}.yml`);
   const temp = `${target}.tmp`;
   await fs.writeFile(temp, config, 'utf8');
   await fs.rename(temp, target);
-  return { host, url: `${scheme}://${host}`, configFile: target, tls: tlsEnabled };
+  return { host, url: `${scheme}://${host}`, configFile: target, tls: tlsEnabled, replicas: names.length };
 }
 
 export async function removeTraffic(name: string) { await fs.rm(path.join(dynamicDir, `${safe(name)}.yml`), { force: true }); }
