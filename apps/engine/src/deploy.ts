@@ -2,7 +2,7 @@ import Docker from 'dockerode';
 import { waitForHealthyContainer, type HealthMode } from './health.js';
 import { switchTraffic } from './router.js';
 
-export type RuntimeSpec = { name: string; image: string; containerPort?: number; hostPort?: number; env?: Record<string, string>; command?: string[]; healthPath?: string; healthMode?: HealthMode; public?: boolean; domain?: string };
+export type RuntimeSpec = { name: string; image: string; containerPort?: number; hostPort?: number; env?: Record<string, string>; command?: string[]; healthPath?: string; healthMode?: HealthMode; public?: boolean; domain?: string; cpuNanoCpus?: number; memoryBytes?: number; pidsLimit?: number; volumeBinds?: string[] };
 
 function dockerClient() {
   if (process.env.DOCKER_HOST) return new Docker({ host: process.env.DOCKER_HOST, port: Number(process.env.DOCKER_PORT ?? 2375) });
@@ -16,7 +16,11 @@ async function createAndStart(docker: Docker, spec: RuntimeSpec, containerName: 
   await ensureNetwork(docker);
   const networkName = process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime';
   const bindings = hostPort !== undefined ? { [`${port}/tcp`]: [{ HostPort: String(hostPort) }] } : undefined;
-  const container = await docker.createContainer({ name: containerName, Image: spec.image, Env: Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`), Cmd: spec.command, ExposedPorts: { [`${port}/tcp`]: {} }, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, ...(bindings ? { PortBindings: bindings } : {}) }, NetworkingConfig: { EndpointsConfig: { [networkName]: {} } }, Labels: { 'nexus.managed': 'true', 'nexus.runtime': spec.name, 'nexus.deployment-container': containerName, 'traefik.enable': 'false', 'nexus.public': String(spec.public !== false) } });
+  const resources: Record<string, unknown> = {};
+  if (spec.cpuNanoCpus && spec.cpuNanoCpus > 0) resources.NanoCpus = Math.floor(spec.cpuNanoCpus);
+  if (spec.memoryBytes && spec.memoryBytes > 0) resources.Memory = Math.floor(spec.memoryBytes);
+  if (spec.pidsLimit && spec.pidsLimit > 0) resources.PidsLimit = Math.floor(spec.pidsLimit);
+  const container = await docker.createContainer({ name: containerName, Image: spec.image, Env: Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`), Cmd: spec.command, ExposedPorts: { [`${port}/tcp`]: {} }, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, ...resources, ...(bindings ? { PortBindings: bindings } : {}), ...(spec.volumeBinds?.length ? { Binds: spec.volumeBinds } : {}) }, NetworkingConfig: { EndpointsConfig: { [networkName]: {} } }, Labels: { 'nexus.managed': 'true', 'nexus.runtime': spec.name, 'nexus.deployment-container': containerName, 'traefik.enable': 'false', 'nexus.public': String(spec.public !== false) } });
   await container.start();
   return container;
 }
@@ -36,8 +40,6 @@ export async function deployRuntime(spec: RuntimeSpec) {
   try {
     const previous = await findActiveContainer(docker, spec.name);
     if (previous) { previousName = previous.Names?.[0]?.replace(/^\//, '') || previous.Id; previousId = previous.Id; }
-    // Public proxy deployments receive a random ephemeral host port for health probing.
-    // Traefik still routes directly over the Docker network, so this port is never public-facing.
     const candidateHostPort = proxyEnabled ? 0 : (previousName ? undefined : (publicService ? requestedHostPort : undefined));
     candidate = await createAndStart(docker, spec, candidateName, candidateHostPort);
     const actualCandidatePort = await inspectHostPort(candidate, port);
