@@ -2,7 +2,9 @@
 
 **A developer cloud built around the application graph.**
 
-Nexus is a Docker-first hosting control plane designed to combine the useful parts of Railway, Render and Neon while adding a first-class application graph, environment workflows, recovery points and infrastructure autopilot.
+Nexus is a Docker-first hosting control plane designed to combine the useful parts of Railway, Render and Neon while adding an application graph, environment workflows, recovery points, cost intelligence and infrastructure autopilot.
+
+> **Production contract:** [`docs/PRODUCTION_PLATFORM.md`](docs/PRODUCTION_PLATFORM.md) is the source of truth for production reliability, security, observability, provider abstraction and feature completeness.
 
 ## What Nexus can host
 
@@ -26,7 +28,29 @@ Nexus accepts either a Git repository or an existing Docker image.
 | Private services | Internal service-to-service workloads |
 | Managed data | Docker-backed PostgreSQL and Redis with persistent named volumes and generated credentials |
 
-A repository-provided **Dockerfile always wins** over automatic detection. This means unusual frameworks, monorepos and custom operating-system dependencies can still be deployed.
+A repository-provided **Dockerfile always wins** over automatic detection. This supports unusual frameworks, monorepos and custom operating-system dependencies.
+
+## Production platform capabilities
+
+- Application graph for services, databases, caches and dependencies
+- Git repository and Docker image deployments
+- Full persisted deployment lifecycle and validated state transitions
+- Rolling, blue/green and canary deployment contracts
+- Health-gated traffic switching and rollback
+- CPU, memory, request-rate and queue-depth autoscaling contracts
+- Preview environments and environment isolation
+- PostgreSQL and Redis managed-data foundations
+- Recovery points and restore contracts
+- Persistent volumes and backup/restore architecture
+- Encrypted secrets, RBAC, scoped API tokens and audit events
+- Structured logs, metrics and OpenTelemetry-compatible observability contracts
+- Server-side usage metering and cost estimation
+- Provider abstraction for Docker now and Kubernetes/cloud providers later
+- Nexus Autopilot contracts for evidence-based incident diagnosis/remediation
+- CLI and declarative `nexus.yaml` deployment model
+- Production quality gates for contracts, Docker configuration and security scanning
+
+The shared platform contracts live in `packages/platform-contracts` and are used to keep the API, engine, agent, providers and console aligned.
 
 ## Runtime features
 
@@ -47,15 +71,11 @@ A repository-provided **Dockerfile always wins** over automatic detection. This 
 - Idempotent deployment requests
 - Deployment lifecycle callbacks
 - Runtime logs
-- Rollback foundation
-- GitHub push webhook foundation
 - Runtime node registry and capacity reporting
 - API tokens with scopes, expiry and revocation
 - Organization/RBAC model
 - Audit logs and usage metering
-- Production readiness endpoint
 - Infrastructure control center at `/platform`
-- PostgreSQL control-plane persistence
 - Declarative `nexus.yaml` validation and deployment through the CLI
 
 ## Infrastructure control center
@@ -112,7 +132,7 @@ See [`docs/NEXUS_YAML.md`](docs/NEXUS_YAML.md) for the manifest contract, monore
 ## Local development
 
 ```bash
-npm install --legacy-peer-deps --force
+npm install
 npm run infra:up
 npm run dev:api
 npm run dev:engine
