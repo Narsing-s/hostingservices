@@ -48,6 +48,18 @@ A repository-provided **Dockerfile always wins** over automatic detection. This 
 - Rollback foundation
 - GitHub push webhook foundation
 - PostgreSQL control-plane persistence
+- Declarative `nexus.yaml` validation and deployment through the CLI
+
+## Declarative deployments
+
+The Nexus CLI can validate and submit a repository deployment from `nexus.yaml`:
+
+```bash
+nexus validate nexus.yaml
+nexus deploy nexus.yaml
+```
+
+See [`docs/NEXUS_YAML.md`](docs/NEXUS_YAML.md) for the manifest contract, monorepo service selection, environment variables and secret-handling rules.
 
 ## Architecture
 
@@ -78,130 +90,29 @@ A repository-provided **Dockerfile always wins** over automatic detection. This 
                        ▼
                     Traefik
                        │
-                 public services
+                       ▼
+                    Internet
 ```
 
-## Local UI — quickest check
-
-Requirements:
-
-- Node.js 20+
-- Docker Desktop running
-
-From the repository root:
+## Local development
 
 ```bash
-npm install
-npm run dev
-```
-
-Open:
-
-```text
-http://localhost:3000
-```
-
-This checks the **frontend/control-plane UI** without requiring the API.
-
-## Full local platform
-
-Start infrastructure first:
-
-```bash
-docker compose up -d
-```
-
-Then use four terminals from the repository root.
-
-### Terminal 1 — API
-
-```bash
+npm install --legacy-peer-deps --force
 npm run dev:api
-```
-
-API:
-
-```text
-http://localhost:4000
-http://localhost:4000/health
-http://localhost:4000/api/v1/capabilities
-```
-
-### Terminal 2 — Engine
-
-```bash
 npm run dev:engine
-```
-
-Engine:
-
-```text
-http://localhost:4100/health
-```
-
-### Terminal 3 — deployment worker
-
-The engine workspace exposes the worker script:
-
-```bash
-npm run start:worker --workspace apps/engine
-```
-
-For watch-mode development, run:
-
-```bash
-npm run dev:worker --workspace apps/engine
-```
-
-### Terminal 4 — web console
-
-```bash
 npm run dev
 ```
 
-Open:
-
-```text
-http://localhost:3000
-```
-
-Set `NEXT_PUBLIC_NEXUS_API_URL=http://localhost:4000` if the UI is running against a different API origin.
-
-## Test a real deployment
-
-The safest first test is an existing Docker image:
-
-1. Open `http://localhost:3000`.
-2. Select **New deployment**.
-3. Leave the Git repository empty.
-4. Choose **Web / frontend / API**.
-5. Use image mode through the API or extend the UI with the image field.
-6. For a repository test, provide a public Git repository containing a Dockerfile.
-7. Watch the deployment stream.
-8. Check `/health` on the API and engine.
-9. Check Docker Desktop for the Nexus runtime container.
-
-For a repository deployment, Nexus builds the image on the engine host, places the deployment in the durable Redis queue, starts a candidate container, performs health validation, and only then switches public traffic.
-
-## Useful API checks
+For local infrastructure:
 
 ```bash
-curl http://localhost:4000/health
-curl http://localhost:4000/api/v1/capabilities
-curl http://localhost:4100/health
-curl http://localhost:4100/api/v1/queue
+npm run infra:up
 ```
 
-## Important production boundary
+The CLI can be linked locally with:
 
-Nexus is now a real deployment/runtime foundation, but a production multi-tenant cloud still needs authentication and workspace authorization, encrypted secrets, resource quotas, persistent volumes, managed database provisioning/backups, multi-node scheduling, provider adapters, billing/usage metering and stronger engine authentication. Those must be implemented as infrastructure capabilities rather than simulated UI features.
+```bash
+npm run cli:link
+```
 
-## Principles
-
-1. **No fake deployment buttons:** every production action maps to an engine operation.
-2. **Dockerfile first:** custom applications remain deployable even when automatic detection cannot understand them.
-3. **No secrets in source control.**
-4. **Health before traffic:** public deployments must pass their configured health signal before traffic is switched.
-5. **Explicit data recovery:** database backup/restore operations must be observable and reversible.
-6. **Provider portability:** the control plane should not depend on one infrastructure vendor.
-7. **Understandable infrastructure:** the UI should show what Nexus is actually doing.
+Then use `nexus --help`.
