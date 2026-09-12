@@ -8,6 +8,7 @@ import { createDeployment, createProject, findProjectByRepo, getDomain, getVerif
 import { registerAuthRoutes } from './auth-routes.js';
 import { registerDeploymentHistoryRoutes } from './deployment-history.js';
 import { registerPlatformRoutes } from './platform-routes.js';
+import { registerPlatformUiRoutes } from './platform-ui-routes.js';
 import { registerRuntimePlatformRoutes, selectDeploymentNode, type DeploymentNode } from './runtime-platform-routes.js';
 import { registerPreviewRoutes } from './preview-routes.js';
 import { registerObservabilityRoutes } from './observability-routes.js';
@@ -32,7 +33,7 @@ app.addHook('onSend',async(_req,reply)=>{reply.header('X-Content-Type-Options','
 app.get('/health',async()=>({ok:true,service:'nexus-api',engine:ENGINE_URL,timestamp:new Date().toISOString()}));
 app.get('/api/v1/readiness',async(_req,reply)=>{try{const engine=await fetch(`${ENGINE_URL}/health`,{signal:AbortSignal.timeout(2000)});const value=await engine.json().catch(()=>({}));if(!engine.ok)return reply.code(503).send({ok:false,api:true,engine:false,detail:value});return {ok:true,api:true,engine:true,engineHealth:value};}catch(error){return reply.code(503).send({ok:false,api:true,engine:false,error:String(error)});}});
 app.get('/api/v1/capabilities',async()=>({ok:true,serviceTypes:['web','worker','cron','private'],sourceTypes:['git','image'],runtimes:['Dockerfile','Node.js','Python','Go','Java Maven','Java Gradle','Rust','.NET','PHP','Ruby'],features:['custom-domains','tls','health-checks','zero-downtime-web-deploys','workers','private-services','rollback','logs','github-webhooks','email-auth','github-oauth','google-oauth','github-repository-browser','monorepo-service-selection','repository-service-discovery','deployment-history','targeted-rollback','github-webhook-deduplication','horizontal-scaling','autoscaling','declarative-deployments','organizations','rbac','environments','services','encrypted-secrets','audit-logs','usage-metering','persistent-volumes','postgresql','redis','preview-environments','managed-postgresql','managed-redis','runtime-nodes','readiness','quotas','observability','deployment-activity','automatic-node-placement']}));
-await registerAuthRoutes(app); await registerDeploymentHistoryRoutes(app); await registerPlatformRoutes(app); await registerRuntimePlatformRoutes(app); await registerPreviewRoutes(app); await registerObservabilityRoutes(app);
+await registerAuthRoutes(app); await registerDeploymentHistoryRoutes(app); await registerPlatformRoutes(app); await registerPlatformUiRoutes(app); await registerRuntimePlatformRoutes(app); await registerPreviewRoutes(app); await registerObservabilityRoutes(app);
 app.get('/api/v1/projects',async()=>listProjects());
 app.post('/api/v1/projects',async(req,reply)=>{const body=z.object({name:z.string().min(1).max(100),repo:z.string().url().optional()}).parse(req.body);const project={id:randomUUID(),...body,createdAt:new Date().toISOString()};await createProject(project);return reply.code(201).send(project);});
 app.get('/api/v1/deployments',async()=>listDeployments());
