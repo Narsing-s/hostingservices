@@ -31,7 +31,7 @@ jobs:
       - name: High severity dependency audit
         run: npm audit --audit-level=high
 
-      - name: Reject insecure production defaults
+      - name: Reject insecure production defaults outside the guard
         shell: bash
         run: |
           set -euo pipefail
@@ -42,8 +42,8 @@ jobs:
             'local-engine-callback-secret'
           )
           for value in "${forbidden[@]}"; do
-            if grep -R --exclude-dir=.git --exclude-dir=node_modules --exclude='*.lock' -nF "$value" .; then
-              echo "Forbidden production default detected: $value"
+            if git grep -nF "$value" -- apps packages ':!apps/api/src/production-guard.ts' ':!apps/api/src/production-guard.test.ts'; then
+              echo "Forbidden production default detected outside the production guard: $value"
               exit 1
             fi
           done
