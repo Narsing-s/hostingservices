@@ -1,0 +1,33 @@
+name: Platform smoke
+on:
+  push:
+    branches: [feat/production-hosting-platform]
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nexus
+          POSTGRES_PASSWORD: nexus
+          POSTGRES_DB: nexus
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U nexus -d nexus"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 24, cache: npm}
+      - run: npm install --legacy-peer-deps --force --no-audit --no-fund
+      - run: npm run build
+        env:
+          DATABASE_URL: postgres://nexus:nexus@127.0.0.1:5432/nexus
+          NODE_ENV: test
+          AUTH_SECRET: smoke-secret
+          SECRETS_ENCRYPTION_KEY: smoke-encryption-secret
+      - name: Validate compose
+        run: docker compose -f infra/docker/docker-compose.yml config
