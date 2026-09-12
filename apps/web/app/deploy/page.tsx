@@ -9,6 +9,8 @@ type Detection = { runtime?: string; service?: string; selectedService?: string 
 type Deployment = { id: string; status: string; service?: string; serviceType?: string; repo?: string };
 type DeploymentLogs = { build?: string; runtime?: string; logs?: string };
 
+type Strategy = 'rolling' | 'blue_green' | 'canary';
+
 const lifecycle: Record<string, { label: string; detail: string }> = {
   queued: { label: 'Queued', detail: 'Waiting for a build worker' },
   building: { label: 'Building', detail: 'Building source into a deployable image' },
@@ -23,6 +25,7 @@ function stateFor(status?: string) { return lifecycle[status ?? ''] ?? { label: 
 export default function DeployPage() {
   const [projectId, setProjectId] = useState(''); const [repo, setRepo] = useState(''); const [ref, setRef] = useState('main');
   const [service, setService] = useState(''); const [serviceType, setServiceType] = useState('web'); const [containerPort, setContainerPort] = useState('3000'); const [healthPath, setHealthPath] = useState('/');
+  const [strategy, setStrategy] = useState<Strategy>('rolling'); const [canarySteps, setCanarySteps] = useState('5,25,50,100');
   const [projects, setProjects] = useState<{ id: string; name: string; repo?: string }[]>([]); const [detection, setDetection] = useState<Detection | null>(null);
   const [detecting, setDetecting] = useState(false); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(''); const [deployment, setDeployment] = useState<Deployment | null>(null);
   const [logs, setLogs] = useState<DeploymentLogs | null>(null); const [showLogs, setShowLogs] = useState(true);
@@ -61,8 +64,10 @@ export default function DeployPage() {
 
   async function deploy() {
     if (!projectId) return setMessage('Select or create a project first.'); if (!repo) return setMessage('Enter a Git repository URL first.'); if (detection?.availableServices?.length && !service) return setMessage('Select a repository service before deploying.');
+    const parsedCanary = canarySteps.split(',').map(v => Number(v.trim())).filter(Number.isFinite).map(Math.round);
+    if (strategy === 'canary' && (!parsedCanary.length || parsedCanary[parsedCanary.length - 1] !== 100 || parsedCanary.some(v => v < 1 || v > 100))) return setMessage('Canary steps must be percentages from 1 to 100 and must end at 100.');
     setBusy(true); setMessage('Queueing deployment…'); setLogs(null);
-    try { const r = await fetch(`${API}/api/v1/deployments`, { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ projectId, repo, ref: ref || 'main', service: service || undefined, serviceType, public: serviceType === 'web', healthMode: serviceType === 'web' ? 'auto' : 'process', containerPort: Number(containerPort) || 80, healthPath: serviceType === 'web' ? healthPath || '/' : undefined }) }); const v = await r.json(); if (!r.ok) throw new Error(v.detail || v.error || 'Deployment failed'); setDeployment(v); setMessage(`Queued: ${v.id.slice(0, 8)}. Nexus will update this screen as the deployment progresses.`); }
+    try { const r = await fetch(`${API}/api/v1/deployments`, { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ projectId, repo, ref: ref || 'main', service: service || undefined, serviceType, public: serviceType === 'web', healthMode: serviceType === 'web' ? 'auto' : 'process', containerPort: Number(containerPort) || 80, healthPath: serviceType === 'web' ? healthPath || '/' : undefined, strategy, canarySteps: strategy === 'canary' ? parsedCanary : undefined }) }); const v = await r.json(); if (!r.ok) throw new Error(v.detail || v.error || 'Deployment failed'); setDeployment(v); setMessage(`Queued: ${v.id.slice(0, 8)}. Nexus will update this screen as the deployment progresses.`); }
     catch (e) { setMessage(e instanceof Error ? e.message : 'Deployment failed'); } finally { setBusy(false); }
   }
 
@@ -77,6 +82,7 @@ export default function DeployPage() {
     {detection && <div className="modalNote"><b>Detected: {detection.runtime ?? 'application'}</b><span>{detection.dockerfileGenerated ? 'Nexus can generate the Dockerfile for this runtime.' : 'Nexus found an existing deployable Dockerfile/runtime.'}</span></div>}
     {Boolean(detection?.availableServices?.length) && <label>Repository service<select value={service} onChange={e => setService(e.target.value)}><option value="">Choose a service…</option>{detection!.availableServices!.map(name => <option key={name} value={name}>{name}</option>)}</select><span>Nexus will build only the selected service directory.</span></label>}
     <div className="formGrid"><label>Container port <input type="number" value={containerPort} onChange={e => setContainerPort(e.target.value)} /></label><label>Health path <input value={healthPath} onChange={e => setHealthPath(e.target.value)} disabled={serviceType !== 'web'} /></label></div>
+    <div className="formGrid"><label>Release strategy<select value={strategy} onChange={e => setStrategy(e.target.value as Strategy)}><option value="rolling">Rolling — replace safely</option><option value="blue_green">Blue/green — isolate then promote</option><option value="canary">Canary — progressive traffic</option></select><span>Traffic changes only after runtime health checks.</span></label><label>Canary steps {strategy === 'canary' ? <input value={canarySteps} onChange={e => setCanarySteps(e.target.value)} placeholder="5,25,50,100" /> : <input value="Not used" disabled />}{strategy === 'canary' && <span>Comma-separated percentages; final step must be 100.</span>}</label></div>
     <button className="deployAction" disabled={busy || !projectId || !repo} onClick={deploy}>{busy ? 'Deploying…' : 'Deploy selected service'}</button>
     {message && <div className="modalNote" style={{ marginTop: 14 }}>{message}</div>}
     {deployment && <div className="capabilities" style={{ marginTop: 14 }}><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}><div><b>{state.label}</b><span>{state.detail}</span></div><RollbackButton deploymentId={deployment.id} disabled={deployment.status !== 'ready'} onComplete={() => { setDeployment({ ...deployment, status: 'rolling_back' }); setMessage('Rollback queued. Nexus is restoring the previous healthy deployment.'); }} /></div><span>Deployment: {deployment.id}</span><span>Lifecycle: Queued → Building → Starting → Running / Failed</span></div>}
