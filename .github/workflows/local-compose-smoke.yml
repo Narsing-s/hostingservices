@@ -67,8 +67,8 @@ jobs:
         run: |
           set -euo pipefail
           SECRET=$(node -e "const c=require('crypto'); console.log(c.createHmac('sha256','local-engine-internal-secret').update('nexus-engine').digest('hex'))")
-          DEPLOYMENT_ID="smoke-${GITHUB_RUN_ID}"
-          PAYLOAD=$(node -e 'console.log(JSON.stringify({name:"nexus-smoke",image:"node:20-bookworm-slim",deploymentId:process.env.DEPLOYMENT_ID,containerPort:3000,public:false,healthMode:"process",command:["node","-e","setInterval(()=>{}, 1000)"]}))' )
+          export DEPLOYMENT_ID="smoke-${GITHUB_RUN_ID}"
+          PAYLOAD=$(node -e 'console.log(JSON.stringify({name:"nexus-smoke",image:"node:20-bookworm-slim",deploymentId:process.env.DEPLOYMENT_ID,containerPort:3000,public:false,healthMode:"process",command:["node","-e","setInterval(()=>{}, 1000)"]}))')
           response=$(curl --fail --show-error --silent \
             -X POST http://127.0.0.1:4100/api/v1/runtime/deploy \
             -H "content-type: application/json" \
@@ -83,11 +83,13 @@ jobs:
               http://127.0.0.1:4100/api/v1/runtime/containers)
             if echo "$containers" | grep -q 'nexus-smoke'; then
               echo "$containers"
+              docker rm -f nexus-smoke 2>/dev/null || true
               exit 0
             fi
             sleep 2
           done
           docker compose logs --tail=300 engine
+          docker rm -f nexus-smoke 2>/dev/null || true
           exit 1
 
       - name: Show service status
