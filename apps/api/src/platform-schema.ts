@@ -1,7 +1,7 @@
 import pg from 'pg';
 const { Pool } = pg;
 
-/** Compatibility bootstrap for existing installations. New production installs should move these statements into versioned migrations. */
+/** Compatibility bootstrap. New installs should move these statements into versioned migrations. */
 export async function ensurePlatformSchema() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? 'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus' });
   try {
@@ -22,7 +22,11 @@ export async function ensurePlatformSchema() {
       CREATE TABLE IF NOT EXISTS usage_events (id uuid PRIMARY KEY,organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,project_id uuid REFERENCES projects(id) ON DELETE CASCADE,service_id uuid REFERENCES services(id) ON DELETE CASCADE,metric text NOT NULL,quantity numeric NOT NULL CHECK(quantity >= 0),unit text NOT NULL,recorded_at timestamptz NOT NULL DEFAULT now());
       CREATE INDEX IF NOT EXISTS usage_events_org_recorded_idx ON usage_events(organization_id,recorded_at DESC);
       CREATE TABLE IF NOT EXISTS volumes (id uuid PRIMARY KEY,service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,name text NOT NULL,size_bytes bigint NOT NULL CHECK(size_bytes > 0),mount_path text NOT NULL,provider text NOT NULL DEFAULT 'docker',created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(service_id,name));
-      CREATE TABLE IF NOT EXISTS database_instances (id uuid PRIMARY KEY,service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,engine text NOT NULL CHECK (engine IN ('postgres','redis')),version text,connection_uri_secret_id uuid REFERENCES secrets(id) ON DELETE SET NULL,status text NOT NULL DEFAULT 'provisioning',endpoint text,container_name text,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE IF NOT EXISTS database_instances (id uuid PRIMARY KEY,service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,engine text NOT NULL CHECK (engine IN ('postgres','redis')),version text,status text NOT NULL DEFAULT 'provisioning',created_at timestamptz NOT NULL DEFAULT now());
+      ALTER TABLE database_instances ADD COLUMN IF NOT EXISTS connection_uri_secret_id uuid REFERENCES secrets(id) ON DELETE SET NULL;
+      ALTER TABLE database_instances ADD COLUMN IF NOT EXISTS endpoint text;
+      ALTER TABLE database_instances ADD COLUMN IF NOT EXISTS container_name text;
+      ALTER TABLE database_instances ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
       CREATE TABLE IF NOT EXISTS runtime_nodes (id uuid PRIMARY KEY,name text NOT NULL UNIQUE,endpoint text NOT NULL,region text NOT NULL DEFAULT 'local',capacity_cpu_millis integer NOT NULL DEFAULT 1000 CHECK(capacity_cpu_millis > 0),capacity_memory_bytes bigint NOT NULL DEFAULT 1073741824 CHECK(capacity_memory_bytes > 0),used_cpu_millis integer NOT NULL DEFAULT 0 CHECK(used_cpu_millis >= 0),used_memory_bytes bigint NOT NULL DEFAULT 0 CHECK(used_memory_bytes >= 0),status text NOT NULL DEFAULT 'online' CHECK(status IN ('online','draining','offline')),last_heartbeat_at timestamptz NOT NULL DEFAULT now(),created_at timestamptz NOT NULL DEFAULT now());
       CREATE INDEX IF NOT EXISTS runtime_nodes_heartbeat_idx ON runtime_nodes(status,last_heartbeat_at DESC);
       CREATE TABLE IF NOT EXISTS cron_jobs (id uuid PRIMARY KEY,service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,schedule text NOT NULL,command jsonb NOT NULL DEFAULT '[]'::jsonb,timezone text NOT NULL DEFAULT 'UTC',enabled boolean NOT NULL DEFAULT true,last_run_at timestamptz,next_run_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
