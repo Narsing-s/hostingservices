@@ -17,6 +17,7 @@ export default function DeployNavigation() {
 
   return <div style={{position:'fixed',top:12,right:16,zIndex:80,display:'flex',gap:6,padding:6,border:'1px solid rgba(255,255,255,.1)',borderRadius:12,background:'rgba(10,12,16,.88)',backdropFilter:'blur(14px)',boxShadow:'0 10px 30px rgba(0,0,0,.25)'}}>
     <a href="/" style={linkStyle}>Console</a>
+    <a href="/deployments" style={linkStyle}>Deployments</a>
     <a href="/deploy" style={linkStyle}>Deploy</a>
     <a href="/platform" style={linkStyle}>Platform</a>
     <a href="/platform/releases" style={linkStyle}>Release safety</a>
