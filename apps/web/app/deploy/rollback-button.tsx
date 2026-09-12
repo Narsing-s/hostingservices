@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_NEXUS_API_URL ?? 'http://localhost:4000';
+const API = '/api/nexus';
 
 type Version = { id: string; status: string; image: string; repo?: string; createdAt: string; service?: string | null; current?: boolean };
 
@@ -14,7 +14,7 @@ export default function RollbackButton({ deploymentId, disabled = false, onCompl
 
   async function loadVersions() {
     try {
-      const response = await fetch(`${API}/api/v1/deployments/${encodeURIComponent(deploymentId)}/versions`, { credentials: 'include' });
+      const response = await fetch(`${API}/v1/deployments/${encodeURIComponent(deploymentId)}/versions`, { credentials: 'include' });
       const value = await response.json();
       if (!response.ok) throw new Error(value.error || 'Could not load deployment history');
       setVersions(value.versions ?? []);
@@ -29,7 +29,7 @@ export default function RollbackButton({ deploymentId, disabled = false, onCompl
     if (!window.confirm(`Rollback to ${target.id.slice(0, 8)} from ${new Date(target.createdAt).toLocaleString()}?`)) return;
     setBusy(true); setError('');
     try {
-      const response = await fetch(`${API}/api/v1/deployments/${encodeURIComponent(deploymentId)}/rollback-to`, {
+      const response = await fetch(`${API}/v1/deployments/${encodeURIComponent(deploymentId)}/rollback-to`, {
         method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ targetDeploymentId: target.id })
       });
