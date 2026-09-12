@@ -24,7 +24,7 @@ Nexus accepts either a Git repository or an existing Docker image.
 | Workers | Long-running private/background processes |
 | Cron/jobs | Process workloads with job-oriented health mode |
 | Private services | Internal service-to-service workloads |
-| Databases | PostgreSQL/Redis infrastructure foundation and connection layer |
+| Managed data | Docker-backed PostgreSQL and Redis with persistent named volumes and generated credentials |
 
 A repository-provided **Dockerfile always wins** over automatic detection. This means unusual frameworks, monorepos and custom operating-system dependencies can still be deployed.
 
@@ -34,10 +34,12 @@ A repository-provided **Dockerfile always wins** over automatic detection. This 
 - Docker image deployment
 - Automatic runtime detection
 - Custom start commands
-- Environment variables
+- Environment variables and encrypted secrets
 - Web, worker, cron and private service modes
+- PostgreSQL and Redis provisioning
 - HTTP, Docker and process health checks
 - Ephemeral candidate ports for safe health probing
+- CPU, memory, PID and volume resource limits
 - Traefik routing and custom domains
 - DNS ownership verification
 - TLS/ACME configuration
@@ -47,8 +49,20 @@ A repository-provided **Dockerfile always wins** over automatic detection. This 
 - Runtime logs
 - Rollback foundation
 - GitHub push webhook foundation
+- Runtime node registry and capacity reporting
+- API tokens with scopes, expiry and revocation
+- Organization/RBAC model
+- Audit logs and usage metering
+- Production readiness endpoint
+- Infrastructure control center at `/platform`
 - PostgreSQL control-plane persistence
 - Declarative `nexus.yaml` validation and deployment through the CLI
+
+## Infrastructure control center
+
+Open `/platform` in the console to see registered runtime nodes, CPU/memory capacity and managed PostgreSQL/Redis services. The page calls the live control-plane APIs rather than using mock data.
+
+Managed data instances are created on the engine's Docker host, attached to the Nexus runtime network, protected with generated credentials, restarted automatically and backed by named Docker volumes. For a public production service, place the engine behind a private network and use an appropriate managed volume/storage provider rather than exposing the Docker host directly.
 
 ## Declarative deployments
 
@@ -75,7 +89,7 @@ See [`docs/NEXUS_YAML.md`](docs/NEXUS_YAML.md) for the manifest contract, monore
                          │ Fastify + Postgres │
                          └─────────┬──────────┘
                                    │
-                        build / deploy / status
+                     schedule / build / deploy
                                    │
                                    ▼
                          ┌────────────────────┐
@@ -83,31 +97,29 @@ See [`docs/NEXUS_YAML.md`](docs/NEXUS_YAML.md) for the manifest contract, monore
                          │ Docker + BullMQ    │
                          └──────┬─────┬───────┘
                                 │     │
-                       ┌────────┘     └────────┐
-                       ▼                       ▼
-                 Docker Runtime             Redis
-                       │
-                       ▼
-                    Traefik
-                       │
-                       ▼
-                    Internet
+                    ┌───────────┘     └───────────┐
+                    ▼                             ▼
+             App containers                 Managed data
+                    │                       PostgreSQL/Redis
+                    └─────────────┬───────────────┘
+                                  ▼
+                              Traefik
+                                  │
+                                  ▼
+                               Internet
 ```
 
 ## Local development
 
 ```bash
 npm install --legacy-peer-deps --force
+npm run infra:up
 npm run dev:api
 npm run dev:engine
 npm run dev
 ```
 
-For local infrastructure:
-
-```bash
-npm run infra:up
-```
+If port `4000` is already occupied, stop the previous Nexus API process before starting another copy.
 
 The CLI can be linked locally with:
 
