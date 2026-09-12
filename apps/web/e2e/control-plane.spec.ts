@@ -33,17 +33,17 @@ test.describe('Nexus control plane', () => {
     await expect(page.getByLabel('Health path')).toBeDisabled();
   });
 
-  test('login page renders safe OAuth state and email authentication form', async ({ page }) => {
+  test('login page renders without a startup API health gate', async ({ page }) => {
     await page.goto('/login');
-    const providerResponse = page.waitForResponse(response => response.url().endsWith('/api/nexus/auth/providers'));
-    await page.reload();
-    await providerResponse;
 
     await expect(page.getByRole('heading', { name: /welcome back/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /continue with github|github unavailable/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /continue with google|google unavailable/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /continue with github/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /continue with google/i })).toBeVisible();
     await expect(page.getByLabel('Email')).toBeVisible();
     await expect(page.getByLabel('Password')).toHaveAttribute('minlength', '8');
+
+    // The login page must render the form even when the API gateway is unavailable.
+    await expect(page.getByText(/nexus api is temporarily unavailable/i)).toHaveCount(0);
 
     await page.getByRole('button', { name: /create one/i }).click();
     await expect(page.getByRole('heading', { name: /create your nexus account/i })).toBeVisible();
