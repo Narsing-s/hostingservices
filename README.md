@@ -68,7 +68,7 @@ Live URL + Logs + Metrics + Deployment history
         └── failure → pause / rollback / recovery point
 ```
 
-A deployment is represented as a generation. Builds now record the source commit and Docker immutable image ID; when a registry digest is available it is also captured. This prevents a release system from treating a mutable image tag as the only identity of a production artifact.
+A deployment is represented as a generation. Builds record the source commit and Docker immutable image ID; when a registry digest is available it is also captured. The API schema now includes a durable `deployment_artifacts` record and database capture trigger so provenance can be persisted with the deployment rather than remaining only in build logs. Promotion should use immutable image identity instead of treating a mutable image tag as the only artifact identity.
 
 ## Supported workloads
 
@@ -146,7 +146,7 @@ A Git deployment should be reproducible enough to answer:
 - Which registry digest was available?
 - Which deployment/generation consumed the artifact?
 
-Nexus captures the source commit and image identity during the build. A registry digest is captured when the image has already been associated with a registry digest. The next promotion layer should prefer immutable digests over mutable tags.
+Nexus captures the source commit and image identity during the build. The platform schema now provides a durable `deployment_artifacts` table keyed to the deployment, with repository, ref, source commit, image, immutable image ID and optional registry digest. The database trigger captures provenance whenever the deployment runtime callback supplies `buildProvenance` or `artifactProvenance`. A registry digest is captured when available; otherwise the local Docker image ID remains the immutable build identity.
 
 ## Release safety
 
@@ -263,8 +263,8 @@ Do not use localhost URLs or development placeholder secrets in production. OAut
 
 Nexus is being built toward a complete hosted control plane rather than a mock dashboard. The remaining production work is tracked explicitly:
 
-1. Tenant isolation and authorization on every project/service/deployment resource.
-2. Immutable artifact records and digest-only promotion where registry digests exist.
+1. Wire the engine build provenance callback into the durable artifact table and make digest-only promotion mandatory when a registry digest exists.
+2. Tenant isolation and authorization on every project/service/deployment resource.
 3. SSRF-safe Git/provider/webhook networking and explicit outbound egress policy.
 4. Preview expiry and automatic cleanup.
 5. Signed webhook delivery with retries and idempotency.
