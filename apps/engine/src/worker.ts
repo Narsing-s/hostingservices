@@ -1,6 +1,7 @@
 import { createDeploymentWorker } from './redis-queue.js';
 import { deployRuntime, rollbackRuntime } from './deploy.js';
 import { deployReplicas } from './replicas.js';
+import { startNodeAgent } from './node-agent.js';
 
 const callbackUrl = process.env.ENGINE_CALLBACK_URL ?? 'http://127.0.0.1:4000';
 const callbackSecret = process.env.ENGINE_CALLBACK_SECRET ?? '';
@@ -16,4 +17,5 @@ createDeploymentWorker(async (job) => {
     await report(deploymentId, 'ready', runtime);
   } catch (error) { const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1); if (finalAttempt) await report(deploymentId, 'failed', { error: error instanceof Error ? error.message : String(error) }); throw error; }
 });
-console.log('Nexus deployment worker started');
+void startNodeAgent();
+console.log(`Nexus deployment worker started on node ${process.env.NODE_NAME ?? 'local'}`);
