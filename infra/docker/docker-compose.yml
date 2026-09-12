@@ -9,6 +9,12 @@ services:
       - '5432:5432'
     volumes:
       - nexus-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U nexus -d nexus']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks: [nexus-runtime]
 
   redis:
@@ -17,6 +23,12 @@ services:
       - '6379:6379'
     volumes:
       - nexus-redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     networks: [nexus-runtime]
 
   traefik:
@@ -34,6 +46,12 @@ services:
       - ./traefik.yml:/etc/traefik/traefik.yml:ro
       - ./dynamic:/etc/traefik/dynamic:ro
       - nexus-traefik-letsencrypt:/letsencrypt
+    healthcheck:
+      test: ['CMD', 'traefik', 'healthcheck', '--ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     networks: [nexus-runtime]
 
 networks:
