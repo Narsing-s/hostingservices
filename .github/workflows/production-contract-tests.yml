@@ -5,22 +5,59 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: TypeScript production contract check
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all production packages
         run: npm run build
+
       - name: Validate production documentation
+        shell: bash
         run: |
+          set -euo pipefail
           test -f docs/PRODUCTION-SERVICES.md
           test -f docs/PRODUCTION-READINESS.md
           test -f docs/PRODUCTION-OPERATIONS.md
           test -f docs/ARTIFACT-PROVENANCE.md
+          grep -q "deployment_artifacts" apps/api/src/platform-schema.ts
+          grep -q "buildProvenance" apps/api/src/platform-schema.ts
+
+      - name: Validate production guard is wired
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f apps/api/src/production-guard.ts
+          grep -q "assertProductionConfiguration" apps/api/src/index.ts
+
+      - name: Validate runtime hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "Privileged: false" apps/engine/src/deploy.ts
+          grep -q "CapDrop" apps/engine/src/deploy.ts
+          grep -q "no-new-privileges:true" apps/engine/src/deploy.ts
+
+      - name: Validate immutable build provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q "sourceCommit" apps/engine/src/build.ts
+          grep -q "imageId" apps/engine/src/build.ts
+          grep -q "RepoDigests" apps/engine/src/build.ts
