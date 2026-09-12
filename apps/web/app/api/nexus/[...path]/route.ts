@@ -26,6 +26,24 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
 
     const out = new Headers(response.headers);
     out.delete('content-length');
+
+    // Preserve OAuth redirects through the same-origin gateway. The browser must
+    // never be redirected to an internal/localhost API address.
+    const location = response.headers.get('location');
+    if (location) {
+      try {
+        const target = new URL(location, getApiUrl());
+        const apiOrigin = new URL(getApiUrl()).origin;
+        if (target.origin === apiOrigin) {
+          out.set('location', `/api/nexus${target.pathname}${target.search}${target.hash}`);
+        } else {
+          out.set('location', target.toString());
+        }
+      } catch {
+        out.set('location', location);
+      }
+    }
+
     return new NextResponse(response.body, { status: response.status, headers: out });
   } catch (error) {
     return NextResponse.json(
