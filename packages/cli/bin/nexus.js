@@ -1,12 +1,27 @@
 #!/usr/bin/env node
 
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { parse } = require('yaml');
+
 const args = process.argv.slice(2);
 const command = args[0];
 const rest = args.slice(1);
 const ENGINE_URL = process.env.NEXUS_ENGINE_URL || 'http://localhost:4100';
+const API_URL = process.env.NEXUS_API_URL || 'http://localhost:4000';
 
 function usage() {
-  console.log(`Nexus CLI 0.4.0\n\nCommands:\n  nexus build <repo> @ <ref> [--service <name>]\n  nexus services <repo> @ <ref>\n\nEnvironment:\n  NEXUS_ENGINE_URL  Engine URL (default: http://localhost:4100)`);
+  console.log(`Nexus CLI 0.5.0
+
+Commands:
+  nexus build <repo> @ <ref> [--service <name>]
+  nexus services <repo> @ <ref>
+  nexus validate [nexus.yaml]
+  nexus deploy [nexus.yaml]
+
+Environment:
+  NEXUS_ENGINE_URL  Engine URL (default: http://localhost:4100)
+  NEXUS_API_URL     API URL (default: http://localhost:4000)`);
 }
 
 function parseRepoRef(values) {
@@ -22,25 +37,133 @@ function option(values, name) {
   return index >= 0 ? values[index + 1] : undefined;
 }
 
-async function post(path, body) {
-  const response = await fetch(`${ENGINE_URL}${path}`, {
+async function request(base, route, options = {}) {
+  const response = await fetch(`${base}${route}`, options);
+  const value = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(value.error || value.detail || `Nexus returned HTTP ${response.status}`);
+  return value;
+}
+
+async function post(base, route, body) {
+  return request(base, route, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(value.error || value.detail || `Nexus engine returned HTTP ${response.status}`);
-  return value;
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function validateManifest(manifest) {
+  assert(manifest && typeof manifest === 'object' && !Array.isArray(manifest), 'Manifest must be a YAML object');
+  assert(manifest.version === 1, 'version must be 1');
+  assert(typeof manifest.name === 'string' && manifest.name.trim(), 'name is required');
+  const service = manifest.service;
+  assert(service && typeof service === 'object', 'service is required');
+  assert(['web', 'worker', 'cron', 'private'].includes(service.type), 'service.type must be web, worker, cron or private');
+  const source = service.source;
+  assert(source && typeof source === 'object', 'service.source is required');
+  assert(source.type === 'git', 'Only service.source.type=git is currently supported by nexus deploy');
+  assert(typeof source.repo === 'string' && /^https?:\/\//.test(source.repo), 'service.source.repo must be an http(s) repository URL');
+  if (source.ref !== undefined) assert(typeof source.ref === 'string' && source.ref.length > 0, 'service.source.ref must be a non-empty string');
+  const build = service.build;
+  if (build !== undefined) {
+    assert(typeof build === 'object', 'service.build must be an object');
+    if (build.runtime !== undefined) assert(build.runtime === 'auto', 'service.build.runtime currently supports only auto');
+    if (build.service !== undefined) assert(typeof build.service === 'string' && /^[a-zA-Z0-9._-]+$/.test(build.service), 'service.build.service contains invalid characters');
+  }
+  const runtime = service.runtime;
+  if (runtime !== undefined) {
+    assert(typeof runtime === 'object', 'service.runtime must be an object');
+    if (runtime.port !== undefined) assert(Number.isInteger(runtime.port) && runtime.port >= 1 && runtime.port <= 65535, 'service.runtime.port must be 1-65535');
+    if (runtime.health !== undefined) {
+      assert(typeof runtime.health === 'object', 'service.runtime.health must be an object');
+      if (runtime.health.path !== undefined) assert(typeof runtime.health.path === 'string' && runtime.health.path.startsWith('/'), 'health.path must start with /');
+      if (runtime.health.mode !== undefined) assert(['auto', 'http', 'docker', 'process'].includes(runtime.health.mode), 'health.mode is invalid');
+    }
+  }
+  const deploy = service.deploy;
+  if (deploy !== undefined) {
+    assert(typeof deploy === 'object', 'service.deploy must be an object');
+    if (deploy.replicas !== undefined) assert(Number.isInteger(deploy.replicas) && deploy.replicas >= 1, 'deploy.replicas must be a positive integer');
+    for (const key of ['zeroDowntime', 'rollbackOnFailure']) if (deploy[key] !== undefined) assert(typeof deploy[key] === 'boolean', `service.deploy.${key} must be boolean`);
+  }
+  if (manifest.env !== undefined) assert(manifest.env && typeof manifest.env === 'object' && !Array.isArray(manifest.env), 'env must be a key/value object');
+  if (manifest.secrets !== undefined) {
+    assert(Array.isArray(manifest.secrets), 'secrets must be an array');
+    for (const secret of manifest.secrets) assert(typeof secret === 'string' && /^[A-Z0-9_]+$/i.test(secret), 'secret names must contain only letters, numbers and underscores');
+  }
+  return manifest;
+}
+
+async function readManifest(file = 'nexus.yaml') {
+  const filename = path.resolve(process.cwd(), file);
+  const source = await fs.readFile(filename, 'utf8');
+  try {
+    return { file: filename, manifest: validateManifest(parse(source)) };
+  } catch (error) {
+    if (error?.name === 'YAMLParseError') throw new Error(`Invalid YAML in ${file}: ${error.message}`);
+    throw error;
+  }
+}
+
+async function deployManifest(file) {
+  const { file: filename, manifest } = await readManifest(file);
+  const service = manifest.service;
+  const source = service.source;
+  const project = await post(API_URL, '/api/v1/projects', { name: manifest.name, repo: source.repo });
+  const runtime = service.runtime || {};
+  const health = runtime.health || {};
+  const env = manifest.env || {};
+  const body = {
+    projectId: project.id,
+    repo: source.repo,
+    ref: source.ref || 'main',
+    service: service.build?.service,
+    serviceType: service.type,
+    public: service.type === 'web',
+    healthMode: health.mode,
+    containerPort: runtime.port || 80,
+    healthPath: health.path,
+    env,
+  };
+  const deployment = await post(API_URL, '/api/v1/deployments', body);
+  console.log(`✓ Manifest valid: ${filename}`);
+  console.log(`✓ Project created: ${project.name} (${project.id})`);
+  console.log(`✓ Deployment accepted: ${deployment.id}`);
+  console.log(`  Service: ${service.type}${service.build?.service ? ` / ${service.build.service}` : ''}`);
+  console.log(`  Repository: ${source.repo}`);
+  console.log(`  Ref: ${source.ref || 'main'}`);
+  console.log(`  Status: ${deployment.status}`);
+  if (manifest.secrets?.length) console.log(`  Secrets declared: ${manifest.secrets.join(', ')} (configure values in Nexus; none were committed)`);
+  return deployment;
 }
 
 async function main() {
   if (!command || command === '--help' || command === '-h') return usage();
-  if (command !== 'build' && command !== 'services') throw new Error(`Unknown command '${command}'. Run nexus --help.`);
+  if (command === 'validate' || command === 'deploy') {
+    const file = rest[0] || 'nexus.yaml';
+    const { file: filename, manifest } = await readManifest(file);
+    if (command === 'validate') {
+      console.log(`✓ Valid Nexus manifest: ${filename}`);
+      console.log(`  Name: ${manifest.name}`);
+      console.log(`  Type: ${manifest.service.type}`);
+      console.log(`  Source: ${manifest.service.source.repo} @ ${manifest.service.source.ref || 'main'}`);
+      if (manifest.service.build?.service) console.log(`  Service: ${manifest.service.build.service}`);
+      if (manifest.secrets?.length) console.log(`  Secrets: ${manifest.secrets.join(', ')}`);
+      return;
+    }
+    await deployManifest(file);
+    return;
+  }
 
+  if (command !== 'build' && command !== 'services') throw new Error(`Unknown command '${command}'. Run nexus --help.`);
   const { repo, ref } = parseRepoRef(rest);
   const service = option(rest, '--service');
   if (command === 'services') {
-    const value = await post('/api/v1/runtime/detect', { repo, ref });
+    const value = await post(ENGINE_URL, '/api/v1/runtime/detect', { repo, ref });
     console.log(`Repository: ${repo}`);
     console.log(`Ref: ${ref}`);
     console.log(`Runtime: ${value.runtime}`);
@@ -55,7 +178,7 @@ async function main() {
 
   const image = `nexus/cli:${Date.now().toString(36)}`;
   console.log(`$ nexus build ${repo} @ ${ref}${service ? ` --service ${service}` : ''}`);
-  const value = await post('/api/v1/runtime/build', { repo, ref, image, service });
+  const value = await post(ENGINE_URL, '/api/v1/runtime/build', { repo, ref, image, service });
   console.log(`\n✓ Build completed: ${value.image}`);
   console.log(`  Runtime: ${value.runtime}`);
   if (value.service) console.log(`  Service: ${value.service}`);
