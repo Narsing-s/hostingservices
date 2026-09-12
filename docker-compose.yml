@@ -4,8 +4,8 @@ include:
 services:
   engine:
     build:
-      context: ./apps/engine
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/engine/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV:-development}
@@ -31,8 +31,8 @@ services:
 
   agent:
     build:
-      context: ./apps/agent
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/agent/Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV:-development}
