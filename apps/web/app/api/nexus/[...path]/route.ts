@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 function getApiUrl() {
-  const value = process.env.NEXUS_API_URL?.trim() || process.env.PUBLIC_API_URL?.trim() || process.env.NEXT_PUBLIC_NEXUS_API_URL?.trim();
-  if (!value) throw new Error('NEXUS_API_URL, PUBLIC_API_URL, or NEXT_PUBLIC_NEXUS_API_URL must be configured');
+  const value = process.env.NEXUS_INTERNAL_URL?.trim() || process.env.NEXUS_API_URL?.trim() || process.env.PUBLIC_API_URL?.trim() || process.env.NEXT_PUBLIC_NEXUS_API_URL?.trim();
+  if (!value) throw new Error('NEXUS_INTERNAL_URL, NEXUS_API_URL, PUBLIC_API_URL, or NEXT_PUBLIC_NEXUS_API_URL must be configured');
   return value.replace(/\/$/, '');
 }
 
@@ -36,7 +36,8 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     }
     return new NextResponse(response.body, { status: response.status, headers: out });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Nexus API proxy failed' }, { status: 503 });
+    const message = error instanceof Error ? error.message : 'Nexus API proxy failed';
+    return NextResponse.json({ error: message, service: 'nexus-api-gateway' }, { status: 503 });
   }
 }
 
