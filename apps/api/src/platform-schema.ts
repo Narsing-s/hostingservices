@@ -1,0 +1,102 @@
+import pg from 'pg';
+const { Pool } = pg;
+
+export async function ensurePlatformSchema() {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? 'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus' });
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS organizations (
+        id uuid PRIMARY KEY,
+        name text NOT NULL,
+        slug text NOT NULL UNIQUE,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS organization_members (
+        organization_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role text NOT NULL CHECK (role IN ('owner','admin','developer','viewer')),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (organization_id,user_id)
+      );
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE;
+      CREATE INDEX IF NOT EXISTS projects_organization_idx ON projects(organization_id,created_at DESC);
+      CREATE TABLE IF NOT EXISTS environments (
+        id uuid PRIMARY KEY,
+        project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        slug text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE(project_id,slug)
+      );
+      CREATE TABLE IF NOT EXISTS services (
+        id uuid PRIMARY KEY,
+        environment_id uuid NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        type text NOT NULL CHECK (type IN ('web','worker','cron','private','database','redis')),
+        source jsonb NOT NULL DEFAULT '{}'::jsonb,
+        config jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE(environment_id,name)
+      );
+      CREATE TABLE IF NOT EXISTS secrets (
+        id uuid PRIMARY KEY,
+        environment_id uuid NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+        service_id uuid REFERENCES services(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        encrypted_value text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE(environment_id,service_id,name)
+      );
+      CREATE TABLE IF NOT EXISTS api_tokens (
+        id uuid PRIMARY KEY,
+        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        token_hash text NOT NULL UNIQUE,
+        scopes jsonb NOT NULL DEFAULT '[]'::jsonb,
+        expires_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        last_used_at timestamptz
+      );
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id uuid PRIMARY KEY,
+        organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,
+        user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+        action text NOT NULL,
+        resource_type text NOT NULL,
+        resource_id text,
+        metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS usage_events (
+        id uuid PRIMARY KEY,
+        organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,
+        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+        service_id uuid REFERENCES services(id) ON DELETE CASCADE,
+        metric text NOT NULL,
+        quantity numeric NOT NULL,
+        unit text NOT NULL,
+        recorded_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS volumes (
+        id uuid PRIMARY KEY,
+        service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        name text NOT NULL,
+        size_bytes bigint NOT NULL,
+        mount_path text NOT NULL,
+        provider text NOT NULL DEFAULT 'docker',
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE(service_id,name)
+      );
+      CREATE TABLE IF NOT EXISTS database_instances (
+        id uuid PRIMARY KEY,
+        service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        engine text NOT NULL CHECK (engine IN ('postgres','redis')),
+        version text,
+        connection_uri_secret_id uuid REFERENCES secrets(id) ON DELETE SET NULL,
+        status text NOT NULL DEFAULT 'provisioning',
+        created_at timestamptz NOT NULL DEFAULT now()
+      );
+    `);
+  } finally { await pool.end(); }
+}

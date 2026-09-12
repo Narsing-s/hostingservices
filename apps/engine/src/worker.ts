@@ -8,7 +8,7 @@ async function report(deploymentId: string | undefined, status: 'starting' | 're
 createDeploymentWorker(async (job) => {
   const { deploymentId } = job.data; await report(deploymentId, job.data.operation === 'rollback' ? 'rolling_back' : 'starting');
   try {
-    const runtimeSpec = { name: job.data.name, image: job.data.image, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, command: job.data.command, healthMode: job.data.healthMode, public: job.data.public, healthPath: job.data.healthPath, domain: job.data.domain, autoscale: job.data.autoscale };
+    const runtimeSpec = { name: job.data.name, image: job.data.image, containerPort: job.data.containerPort, hostPort: job.data.hostPort, env: job.data.env, command: job.data.command, healthMode: job.data.healthMode, public: job.data.public, healthPath: job.data.healthPath, domain: job.data.domain, autoscale: job.data.autoscale, cpuNanoCpus: job.data.cpuNanoCpus, memoryBytes: job.data.memoryBytes, pidsLimit: job.data.pidsLimit, volumeBinds: job.data.volumeBinds };
     let runtime;
     if (job.data.operation === 'rollback') { if (!job.data.previousImage) throw new Error('previousImage is required for rollback'); runtime = await rollbackRuntime({ ...runtimeSpec, previousImage: job.data.previousImage }); }
     else if ((job.data.replicas ?? 1) > 1 || job.data.autoscale) runtime = await deployReplicas({ ...runtimeSpec, replicas: job.data.replicas ?? job.data.autoscale?.min ?? 1, zeroDowntime: job.data.zeroDowntime, rollbackOnFailure: job.data.rollbackOnFailure });
