@@ -7,8 +7,8 @@ export type DeploymentJob = {
   cpuNanoCpus?: number; memoryBytes?: number; pidsLimit?: number; volumeBinds?: string[];
 };
 function connection() { const url=process.env.REDIS_URL??'redis://127.0.0.1:6379'; const parsed=new URL(url); return {host:parsed.hostname,port:Number(parsed.port||6379),username:parsed.username||undefined,password:parsed.password||undefined,maxRetriesPerRequest:null}; }
-const queuePrefix=process.env.DEPLOYMENT_QUEUE_PREFIX??'nexus-deployments';
-function queueName(nodeName?:string){const node=String(nodeName??process.env.NODE_NAME??'local').trim().replace(/[^a-zA-Z0-9._-]/g,'-').slice(0,80)||'local';return `${queuePrefix}:${node}`;}
+const queuePrefix=String(process.env.DEPLOYMENT_QUEUE_PREFIX??'nexus-deployments').trim().replace(/[^a-zA-Z0-9._-]/g,'-').replace(/-+/g,'-').replace(/^[-.]+|[-.]+$/g,'').slice(0,60)||'nexus-deployments';
+function queueName(nodeName?:string){const node=String(nodeName??process.env.NODE_NAME??'local').trim().replace(/[^a-zA-Z0-9._-]/g,'-').replace(/-+/g,'-').replace(/^[-.]+|[-.]+$/g,'').slice(0,80)||'local';return `${queuePrefix}-${node}`;}
 export function deploymentQueueFor(nodeName?:string){return new Queue<DeploymentJob>(queueName(nodeName),{connection:connection(),defaultJobOptions:{attempts:Number(process.env.DEPLOYMENT_RETRIES??3),backoff:{type:'exponential',delay:2000},removeOnComplete:{age:24*60*60,count:1000},removeOnFail:{age:7*24*60*60,count:5000}}});}
 export const deploymentQueue=deploymentQueueFor(); export const deploymentEvents=new QueueEvents(queueName(),{connection:connection()});
 export async function enqueueDeployment(job:DeploymentJob,idempotencyKey?:string){const queue=deploymentQueueFor(job.nodeName);const jobId=idempotencyKey?.replace(/[^a-zA-Z0-9:_-]/g,'_').slice(0,200);const existing=jobId?await queue.getJob(jobId):undefined;if(existing)return existing;return queue.add(job.operation,job,jobId?{jobId}:undefined);}
