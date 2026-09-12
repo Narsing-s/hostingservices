@@ -42,13 +42,14 @@ function oauthConfig(provider: 'github' | 'google') {
 }
 
 function oauthUnavailable(reply: any, provider: 'github' | 'google') {
-  // Keep provider configuration details out of the public response. The platform
-  // operator configures OAuth once; end users should never be asked for credentials.
-  const error = `${provider}_oauth_unavailable`;
-  return reply.redirect(`${WEB_URL}/login?error=${error}`);
+  return reply.redirect(`${WEB_URL}/login?error=${provider}_oauth_unavailable`);
 }
 
 export async function registerAuthRoutes(app: FastifyInstance) {
+  // Public capability endpoint: reports only whether a provider is configured.
+  // Never returns client IDs, secrets, tokens, or callback credentials.
+  app.get('/api/auth/providers', async () => ({ github: Boolean(oauthConfig('github')), google: Boolean(oauthConfig('google')) }));
+
   app.get('/api/auth/me', async req => ({ user: await userFromToken(getCookie(req, 'nexus_session')) ?? null }));
   app.post('/api/auth/register', async (req, reply) => { const body = req.body as { email?: string; password?: string; name?: string }; const email = body.email?.trim().toLowerCase(); const password = body.password ?? ''; const name = body.name?.trim() || email?.split('@')[0] || ''; if (!email || password.length < 8 || !name) return reply.code(400).send({ error: 'name, email and a password of at least 8 characters are required' }); if (await findEmailUser(email)) return reply.code(409).send({ error: 'An account with this email already exists' }); const user = await createUser({ id: randomUUID(), email, name, passwordHash: hashPassword(password) }); await setLogin(reply, user.id); return reply.code(201).send({ user }); });
   app.post('/api/auth/login', async (req, reply) => { const body = req.body as { email?: string; password?: string }; const user = body.email ? await findEmailUser(body.email.trim().toLowerCase()) : undefined; if (!user?.passwordHash || !verifyPassword(body.password ?? '', user.passwordHash)) return reply.code(401).send({ error: 'Invalid email or password' }); await setLogin(reply, user.id); return reply.send({ user: { id: user.id, email: user.email, name: user.name, avatarUrl: user.avatarUrl, createdAt: user.createdAt } }); });
