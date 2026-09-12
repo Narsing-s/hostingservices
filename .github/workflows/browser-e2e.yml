@@ -58,7 +58,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nexus-browser-e2e-report
           path: apps/web/playwright-report/
