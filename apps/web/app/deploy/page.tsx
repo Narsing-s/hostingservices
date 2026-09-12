@@ -3,12 +3,11 @@
 import { useEffect, useState } from 'react';
 import RollbackButton from './rollback-button';
 
-const API = process.env.NEXT_PUBLIC_NEXUS_API_URL ?? 'http://localhost:4000';
+const API = '/api/nexus';
 
 type Detection = { runtime?: string; service?: string; selectedService?: string | null; availableServices?: string[]; dockerfileGenerated?: boolean };
 type Deployment = { id: string; status: string; service?: string; serviceType?: string; repo?: string };
 type DeploymentLogs = { build?: string; runtime?: string; logs?: string };
-
 type Strategy = 'rolling' | 'blue_green' | 'canary';
 
 const lifecycle: Record<string, { label: string; detail: string }> = {
@@ -31,7 +30,7 @@ export default function DeployPage() {
   const [logs, setLogs] = useState<DeploymentLogs | null>(null); const [showLogs, setShowLogs] = useState(true);
 
   useEffect(() => {
-    fetch(`${API}/api/v1/projects`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(v => { setProjects(v); if (v[0]) { setProjectId(v[0].id); setRepo(v[0].repo ?? ''); } }).catch(() => setMessage('API is not reachable. Start the Nexus API on port 4000.'));
+    fetch(`${API}/api/v1/projects`, { credentials: 'include' }).then(r => r.ok ? r.json() : []).then(v => { setProjects(v); if (v[0]) { setProjectId(v[0].id); setRepo(v[0].repo ?? ''); } }).catch(() => setMessage('Nexus API is temporarily unavailable.'));
   }, []);
 
   useEffect(() => {
