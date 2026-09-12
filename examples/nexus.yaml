@@ -1,0 +1,29 @@
+version: 1
+name: my-service
+
+service:
+  type: web
+  source:
+    type: git
+    repo: https://github.com/example/my-service.git
+    ref: main
+  build:
+    runtime: auto
+    service: frontend
+  runtime:
+    port: 3000
+    health:
+      path: /health
+      mode: auto
+  deploy:
+    replicas: 1
+    zeroDowntime: true
+    rollbackOnFailure: true
+
+env:
+  NODE_ENV: production
+
+# Secrets should be configured in Nexus, not committed here.
+secrets:
+  - DATABASE_URL
+  - API_KEY
