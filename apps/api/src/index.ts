@@ -8,7 +8,7 @@ import { createDeployment, createProject, findProjectByRepo, getDomain, getVerif
 import { registerAuthRoutes } from './auth-routes.js';
 import { registerDeploymentHistoryRoutes } from './deployment-history.js';
 import { registerPlatformRoutes } from './platform-routes.js';
-import { registerRuntimePlatformRoutes, selectDeploymentNode } from './runtime-platform-routes.js';
+import { registerRuntimePlatformRoutes, selectDeploymentNode, type DeploymentNode } from './runtime-platform-routes.js';
 import { registerPreviewRoutes } from './preview-routes.js';
 import { registerObservabilityRoutes } from './observability-routes.js';
 import { ensurePlatformSchema } from './platform-schema.js';
@@ -26,7 +26,7 @@ const serviceSchema=z.string().min(1).max(100).regex(/^[a-zA-Z0-9._-]+$/).option
 const autoscaleSchema=z.object({min:z.number().int().min(1).max(20),max:z.number().int().min(1).max(20),cpuPercent:z.number().min(1).max(100),intervalSeconds:z.number().int().min(10).max(300).optional()}).refine(v=>v.max>=v.min,{message:'autoscale.max must be >= autoscale.min'}).optional();
 function engineSecret(){if(!ENGINE_INTERNAL_SECRET&&process.env.NODE_ENV==='production')throw new Error('ENGINE_INTERNAL_SECRET is required in production');return createHmac('sha256',ENGINE_INTERNAL_SECRET||'change-this-secret').update('nexus-engine').digest('hex');}
 function engineHeaders(){return {'content-type':'application/json','x-engine-secret':engineSecret()};}
-async function engineEndpoint(preferredRegion?:string){const node=await selectDeploymentNode(100,128*1024*1024,preferredRegion);if(!node)return {name:'local',endpoint:ENGINE_URL,region:'local'};return node;}
+async function engineEndpoint(preferredRegion?:string):Promise<DeploymentNode>{const node=await selectDeploymentNode(100,128*1024*1024,preferredRegion);if(!node)return {id:'local',name:'local',endpoint:ENGINE_URL,region:'local'};return node;}
 app.addHook('onRequest',async(req,reply)=>{if(req.url.startsWith('/api/webhooks/'))return;const method=req.method;if(!['GET','HEAD','OPTIONS'].includes(method)&&req.headers['content-length']&&Number(req.headers['content-length'])>1024*1024)return reply.code(413).send({error:'Request body too large'});});
 app.addHook('onSend',async(_req,reply)=>{reply.header('X-Content-Type-Options','nosniff');reply.header('X-Frame-Options','DENY');reply.header('Referrer-Policy','strict-origin-when-cross-origin');reply.header('Permissions-Policy','camera=(),microphone=(),geolocation=()');reply.header('Cache-Control','no-store');});
 app.get('/health',async()=>({ok:true,service:'nexus-api',engine:ENGINE_URL,timestamp:new Date().toISOString()}));
