@@ -1,6 +1,10 @@
 import pg from 'pg';
 const { Pool } = pg;
 
+/**
+ * Compatibility bootstrap for existing installations. New production installs
+ * should eventually move these statements into the migration system.
+ */
 export async function ensurePlatformSchema() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? 'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus' });
   try {
@@ -45,9 +49,11 @@ export async function ensurePlatformSchema() {
         name text NOT NULL,
         encrypted_value text NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now(),
-        UNIQUE(environment_id,service_id,name)
+        updated_at timestamptz NOT NULL DEFAULT now()
       );
+      ALTER TABLE secrets DROP CONSTRAINT IF EXISTS secrets_environment_id_service_id_name_key;
+      CREATE UNIQUE INDEX IF NOT EXISTS secrets_environment_name_global_idx ON secrets(environment_id,name) WHERE service_id IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS secrets_environment_service_name_idx ON secrets(environment_id,service_id,name) WHERE service_id IS NOT NULL;
       CREATE TABLE IF NOT EXISTS api_tokens (
         id uuid PRIMARY KEY,
         user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -68,6 +74,7 @@ export async function ensurePlatformSchema() {
         metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
         created_at timestamptz NOT NULL DEFAULT now()
       );
+      CREATE INDEX IF NOT EXISTS audit_logs_org_created_idx ON audit_logs(organization_id,created_at DESC);
       CREATE TABLE IF NOT EXISTS usage_events (
         id uuid PRIMARY KEY,
         organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,
@@ -78,6 +85,7 @@ export async function ensurePlatformSchema() {
         unit text NOT NULL,
         recorded_at timestamptz NOT NULL DEFAULT now()
       );
+      CREATE INDEX IF NOT EXISTS usage_events_org_recorded_idx ON usage_events(organization_id,recorded_at DESC);
       CREATE TABLE IF NOT EXISTS volumes (
         id uuid PRIMARY KEY,
         service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,
