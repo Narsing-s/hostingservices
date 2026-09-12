@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { addDeploymentEvent, createRecoveryPoint, getApplicationGraph, getDeploymentState, listDeploymentEvents, listRecoveryPoints, listRecoverableDeployments, recordAutoscalingDecision, updateDeploymentState, upsertGraphEdge, upsertGraphNode } from './db.js';
+import { addDeploymentEvent, createRecoveryPoint, getApplicationGraph, getDeploymentState, listDeploymentEvents, listRecoveryPoints, listRecoverableDeployments, recordAutoscalingDecision, updateDeployment, updateDeploymentState, upsertGraphEdge, upsertGraphNode } from './db.js';
 
 const engineSecret = () => process.env.ENGINE_CALLBACK_SECRET ?? '';
 function validEngineCallback(req: any) {
@@ -10,7 +10,7 @@ function validEngineCallback(req: any) {
 }
 
 export async function registerProductionPlatformRoutes(app: FastifyInstance) {
-  app.get('/api/v1/deployments/:id/events', async (req, reply) => {
+  app.get('/api/v1/deployments/:id/events', async req => {
     const id = String((req.params as { id: string }).id);
     return { deploymentId: id, events: await listDeploymentEvents(id) };
   });
@@ -65,6 +65,14 @@ export async function registerProductionPlatformRoutes(app: FastifyInstance) {
 
   // Engine-only lifecycle callback. It deliberately lives outside /api/v1 so the
   // user authentication hook cannot block trusted node callbacks.
+  app.post('/api/internal/deployments/:id/status', async (req, reply) => {
+    if (!validEngineCallback(req)) return reply.code(401).send({ error: 'Unauthorized engine callback' });
+    const id = String((req.params as { id: string }).id);
+    const body = z.object({ status: z.enum(['queued', 'building', 'starting', 'ready', 'failed', 'rolling_back']), runtime: z.unknown().optional() }).parse(req.body);
+    await updateDeployment(id, body.status, body.runtime);
+    return { ok: true, deploymentId: id, status: body.status };
+  });
+
   app.post('/api/internal/deployments/:id/state', async (req, reply) => {
     if (!validEngineCallback(req)) return reply.code(401).send({ error: 'Unauthorized engine callback' });
     const id = String((req.params as { id: string }).id);
@@ -83,8 +91,6 @@ export async function registerProductionPlatformRoutes(app: FastifyInstance) {
     return { ok: true, deploymentId: id, phase: body.phase };
   });
 
-  // Used by engine startup/recovery tooling to discover work whose durable state
-  // says it was active when a node or process disappeared.
   app.get('/api/internal/deployments/recoverable', async (req, reply) => {
     if (!validEngineCallback(req)) return reply.code(401).send({ error: 'Unauthorized engine callback' });
     return { deployments: await listRecoverableDeployments() };
