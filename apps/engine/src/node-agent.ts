@@ -17,7 +17,7 @@ async function capacity(){
   const containers=await docker.listContainers({all:false});
   let usedCpuMillis=0; let usedMemoryBytes=0;
   for(const item of containers){
-    try{const c=docker.getContainer(item.Id);const stats=await c.stats({stream:false});const limit=Number(stats.memory_stats?.limit??0);const usage=Number(stats.memory_stats?.usage??0);usedMemoryBytes+=usage;const nano=Number(c.data?.HostConfig?.NanoCpus??0);usedCpuMillis+=nano?nano/1_000_000:0; if(!limit){} }catch{}
+    try{const c=docker.getContainer(item.Id);const stats=await c.stats({stream:false});const usage=Number(stats.memory_stats?.usage??0);usedMemoryBytes+=usage;const inspect=await c.inspect() as any;const nano=Number(inspect.HostConfig?.NanoCpus??0);usedCpuMillis+=nano?nano/1_000_000:0;}catch{}
   }
   return {capacityCpuMillis:cpus*1000,capacityMemoryBytes:memory,usedCpuMillis,usedMemoryBytes};
 }
@@ -25,7 +25,7 @@ async function capacity(){
 async function register(){
   if(!secret)return;
   const c=await capacity();
-  const response=await fetch(`${apiUrl}/api/v1/runtime/nodes/register`,{method:'POST',headers:{'content-type':'application/json','x-engine-secret':authHeader()},body:JSON.stringify({name,endpoint,region,...c})});
+  const response=await fetch(`${apiUrl}/api/v1/runtime/nodes`,{method:'POST',headers:{'content-type':'application/json','x-engine-secret':authHeader()},body:JSON.stringify({name,endpoint,region,...c})});
   if(!response.ok)throw new Error(`node registration failed: ${response.status}`);
 }
 async function heartbeat(){
