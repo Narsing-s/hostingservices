@@ -31,7 +31,6 @@ export async function ensurePlatformSchema() {
       CREATE INDEX IF NOT EXISTS runtime_nodes_heartbeat_idx ON runtime_nodes(status,last_heartbeat_at DESC);
       CREATE TABLE IF NOT EXISTS cron_jobs (id uuid PRIMARY KEY,service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,schedule text NOT NULL,command jsonb NOT NULL DEFAULT '[]'::jsonb,timezone text NOT NULL DEFAULT 'UTC',enabled boolean NOT NULL DEFAULT true,last_run_at timestamptz,next_run_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
       CREATE INDEX IF NOT EXISTS cron_jobs_due_idx ON cron_jobs(enabled,next_run_at);
-
       CREATE TABLE IF NOT EXISTS deployment_events (id uuid PRIMARY KEY,deployment_id uuid NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,phase text NOT NULL,message text NOT NULL,metadata jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now());
       CREATE INDEX IF NOT EXISTS deployment_events_deployment_idx ON deployment_events(deployment_id,created_at ASC);
       CREATE TABLE IF NOT EXISTS recovery_points (id uuid PRIMARY KEY,project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,deployment_id uuid REFERENCES deployments(id) ON DELETE SET NULL,service_id uuid REFERENCES services(id) ON DELETE SET NULL,label text NOT NULL,image text,runtime jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now());
@@ -43,6 +42,14 @@ export async function ensurePlatformSchema() {
       CREATE INDEX IF NOT EXISTS autoscaling_decisions_service_idx ON autoscaling_decisions(service_id,created_at DESC);
       CREATE TABLE IF NOT EXISTS incidents (id uuid PRIMARY KEY,project_id uuid REFERENCES projects(id) ON DELETE CASCADE,deployment_id uuid REFERENCES deployments(id) ON DELETE SET NULL,severity text NOT NULL DEFAULT 'warning',status text NOT NULL DEFAULT 'open',title text NOT NULL,details jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now(),resolved_at timestamptz);
       CREATE INDEX IF NOT EXISTS incidents_project_idx ON incidents(project_id,created_at DESC);
+      CREATE TABLE IF NOT EXISTS release_policies (project_id uuid PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,strategy text NOT NULL DEFAULT 'rolling' CHECK(strategy IN ('rolling','blue_green','canary')),canary_steps jsonb NOT NULL DEFAULT '[5,25,50,100]'::jsonb,zero_downtime boolean NOT NULL DEFAULT true,rollback_on_failure boolean NOT NULL DEFAULT true,updated_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE IF NOT EXISTS release_gates (id uuid PRIMARY KEY,project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,name text NOT NULL,kind text NOT NULL CHECK(kind IN ('health','smoke','error_rate','latency','security','github_check','manual')),required boolean NOT NULL DEFAULT true,config jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(project_id,name));
+      CREATE TABLE IF NOT EXISTS release_gate_runs (id uuid PRIMARY KEY,gate_id uuid NOT NULL REFERENCES release_gates(id) ON DELETE CASCADE,deployment_id uuid NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,status text NOT NULL CHECK(status IN ('pending','running','passed','failed','skipped')),details jsonb NOT NULL DEFAULT '{}'::jsonb,started_at timestamptz,finished_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+      CREATE INDEX IF NOT EXISTS release_gate_runs_deployment_idx ON release_gate_runs(deployment_id,created_at DESC);
+      CREATE TABLE IF NOT EXISTS preview_policies (project_id uuid PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,access text NOT NULL DEFAULT 'team' CHECK(access IN ('public','team','protected')),require_auth boolean NOT NULL DEFAULT true,expires_hours integer NOT NULL DEFAULT 168 CHECK(expires_hours BETWEEN 1 AND 8760),updated_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE IF NOT EXISTS deployment_comments (id uuid PRIMARY KEY,deployment_id uuid NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,user_id uuid REFERENCES users(id) ON DELETE SET NULL,body text NOT NULL CHECK(length(body) BETWEEN 1 AND 4000),created_at timestamptz NOT NULL DEFAULT now());
+      CREATE INDEX IF NOT EXISTS deployment_comments_deployment_idx ON deployment_comments(deployment_id,created_at ASC);
+      CREATE TABLE IF NOT EXISTS project_settings (project_id uuid PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,settings jsonb NOT NULL DEFAULT '{}'::jsonb,updated_at timestamptz NOT NULL DEFAULT now());
     `);
   } finally { await pool.end(); }
 }
