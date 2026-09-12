@@ -41,6 +41,13 @@ function oauthConfig(provider: 'github' | 'google') {
   return { clientId, clientSecret, callback };
 }
 
+function oauthUnavailable(reply: any, provider: 'github' | 'google') {
+  // Keep provider configuration details out of the public response. The platform
+  // operator configures OAuth once; end users should never be asked for credentials.
+  const error = `${provider}_oauth_unavailable`;
+  return reply.redirect(`${WEB_URL}/login?error=${error}`);
+}
+
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.get('/api/auth/me', async req => ({ user: await userFromToken(getCookie(req, 'nexus_session')) ?? null }));
   app.post('/api/auth/register', async (req, reply) => { const body = req.body as { email?: string; password?: string; name?: string }; const email = body.email?.trim().toLowerCase(); const password = body.password ?? ''; const name = body.name?.trim() || email?.split('@')[0] || ''; if (!email || password.length < 8 || !name) return reply.code(400).send({ error: 'name, email and a password of at least 8 characters are required' }); if (await findEmailUser(email)) return reply.code(409).send({ error: 'An account with this email already exists' }); const user = await createUser({ id: randomUUID(), email, name, passwordHash: hashPassword(password) }); await setLogin(reply, user.id); return reply.code(201).send({ user }); });
@@ -49,7 +56,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get('/api/auth/github/start', async (_req, reply) => {
     const config = oauthConfig('github');
-    if (!config) return reply.code(503).send({ error: 'GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.' });
+    if (!config) return oauthUnavailable(reply, 'github');
     const state = signedState('github');
     reply.header('set-cookie', `nexus_oauth_state=${encodeURIComponent(state)}; Path=/; Max-Age=600; HttpOnly; SameSite=Lax${isProduction ? '; Secure' : ''}`);
     return reply.redirect(`https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(config.clientId)}&redirect_uri=${encodeURIComponent(config.callback)}&scope=${encodeURIComponent('read:user user:email repo')}&state=${encodeURIComponent(state)}`);
@@ -57,7 +64,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get('/api/auth/github/callback', async (req, reply) => {
     const config = oauthConfig('github');
-    if (!config) return reply.redirect(`${WEB_URL}/login?error=github_not_configured`);
+    if (!config) return reply.redirect(`${WEB_URL}/login?error=github_oauth_unavailable`);
     const q = req.query as { code?: string; state?: string }; const saved = getCookie(req, 'nexus_oauth_state');
     if (!validState(q.state, 'github') || q.state !== saved) return reply.redirect(`${WEB_URL}/login?error=invalid_oauth_state`);
     if (!q.code) return reply.redirect(`${WEB_URL}/login?error=github_cancelled`);
@@ -77,13 +84,13 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get('/api/auth/google/start', async (_req, reply) => {
     const config = oauthConfig('google');
-    if (!config) return reply.code(503).send({ error: 'Google OAuth is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.' });
+    if (!config) return oauthUnavailable(reply, 'google');
     const state = signedState('google'); reply.header('set-cookie', `nexus_oauth_state=${encodeURIComponent(state)}; Path=/; Max-Age=600; HttpOnly; SameSite=Lax${isProduction ? '; Secure' : ''}`);
     return reply.redirect(`https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(config.clientId)}&redirect_uri=${encodeURIComponent(config.callback)}&response_type=code&scope=${encodeURIComponent('openid email profile')}&access_type=offline&prompt=select_account&state=${encodeURIComponent(state)}`);
   });
 
   app.get('/api/auth/google/callback', async (req, reply) => {
-    const config = oauthConfig('google'); if (!config) return reply.redirect(`${WEB_URL}/login?error=google_not_configured`);
+    const config = oauthConfig('google'); if (!config) return reply.redirect(`${WEB_URL}/login?error=google_oauth_unavailable`);
     const q = req.query as { code?: string; state?: string }; const saved = getCookie(req, 'nexus_oauth_state');
     if (!validState(q.state, 'google') || q.state !== saved) return reply.redirect(`${WEB_URL}/login?error=invalid_oauth_state`);
     if (!q.code) return reply.redirect(`${WEB_URL}/login?error=google_cancelled`);
