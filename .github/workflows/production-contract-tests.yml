@@ -1,0 +1,26 @@
+name: Production Contract Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: TypeScript production contract check
+        run: npm run build
+      - name: Validate production documentation
+        run: |
+          test -f docs/PRODUCTION-SERVICES.md
+          test -f docs/PRODUCTION-READINESS.md
+          test -f docs/PRODUCTION-OPERATIONS.md
+          test -f docs/ARTIFACT-PROVENANCE.md
