@@ -27,7 +27,7 @@ services:
           name: nexus-redis
           property: connectionString
       - key: ENGINE_URL
-        value: http://nexus-engine:4100
+        value: http://localhost:4100
       - key: ENGINE_INTERNAL_SECRET
         generateValue: true
       - key: ENGINE_CALLBACK_SECRET
@@ -49,43 +49,6 @@ services:
     name: nexus-redis
     plan: free
     ipAllowList: []
-
-  - type: pserv
-    name: nexus-engine
-    runtime: docker
-    dockerfilePath: ./apps/engine/Dockerfile
-    dockerContext: .
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 4100
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: nexus-redis
-          property: connectionString
-      - key: ENGINE_INTERNAL_SECRET
-        fromService:
-          type: web
-          name: nexus-api
-          envVarKey: ENGINE_INTERNAL_SECRET
-
-  - type: pserv
-    name: nexus-web
-    runtime: docker
-    dockerfilePath: ./apps/web/Dockerfile
-    dockerContext: .
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 3000
-      - key: NEXUS_API_URL
-        fromService:
-          type: web
-          name: nexus-api
-          property: hostport
 
 databases:
   - name: nexus-postgres
