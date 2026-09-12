@@ -7,8 +7,10 @@ import { z } from 'zod';
 import { createDeployment, createProject, findProjectByRepo, getDomain, getVerifiedDomain, initDb, listDeployments, listDomains, listProjects, markDomainVerified, projectExists, createDomain, updateDeployment, claimGithubDelivery } from './db.js';
 import { registerAuthRoutes } from './auth-routes.js';
 import { registerDeploymentHistoryRoutes } from './deployment-history.js';
+import { registerPlatformRoutes } from './platform-routes.js';
+import { ensurePlatformSchema } from './platform-schema.js';
 const app=Fastify({logger:true});
-await app.register(cors,{origin:true,credentials:true});
+await app.register(cors,{origin:(process.env.WEB_URL??'http://localhost:3000'),credentials:true});
 await app.register(rawBody,{field:'rawBody',global:false,encoding:'utf8',runFirst:true});
 const ENGINE_URL=process.env.ENGINE_URL??'http://localhost:4100';
 const ENGINE_CALLBACK_SECRET=process.env.ENGINE_CALLBACK_SECRET??'';
@@ -17,10 +19,12 @@ const domainPattern=/^(?=.{1,253}$)([a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])
 const commandSchema=z.array(z.string().min(1).max(2000)).max(32).optional();
 const serviceSchema=z.string().min(1).max(100).regex(/^[a-zA-Z0-9._-]+$/).optional();
 const autoscaleSchema=z.object({min:z.number().int().min(1).max(20),max:z.number().int().min(1).max(20),cpuPercent:z.number().min(1).max(100),intervalSeconds:z.number().int().min(10).max(300).optional()}).refine(v=>v.max>=v.min,{message:'autoscale.max must be >= autoscale.min'}).optional();
+app.addHook('onSend',async(_req,reply)=>{reply.header('X-Content-Type-Options','nosniff');reply.header('X-Frame-Options','DENY');reply.header('Referrer-Policy','strict-origin-when-cross-origin');reply.header('Permissions-Policy','camera=(),microphone=(),geolocation=()');});
 app.get('/health',async()=>({ok:true,service:'nexus-api',engine:ENGINE_URL,timestamp:new Date().toISOString()}));
-app.get('/api/v1/capabilities',async()=>({ok:true,serviceTypes:['web','worker','cron','private'],sourceTypes:['git','image'],runtimes:['Dockerfile','Node.js','Python','Go','Java Maven','Java Gradle','Rust','.NET','PHP','Ruby'],features:['custom-domains','tls','health-checks','zero-downtime-web-deploys','workers','private-services','rollback','logs','github-webhooks','email-auth','github-oauth','google-oauth','github-repository-browser','monorepo-service-selection','repository-service-discovery','deployment-history','targeted-rollback','github-webhook-deduplication','horizontal-scaling','autoscaling','declarative-deployments']}));
+app.get('/api/v1/capabilities',async()=>({ok:true,serviceTypes:['web','worker','cron','private'],sourceTypes:['git','image'],runtimes:['Dockerfile','Node.js','Python','Go','Java Maven','Java Gradle','Rust','.NET','PHP','Ruby'],features:['custom-domains','tls','health-checks','zero-downtime-web-deploys','workers','private-services','rollback','logs','github-webhooks','email-auth','github-oauth','google-oauth','github-repository-browser','monorepo-service-selection','repository-service-discovery','deployment-history','targeted-rollback','github-webhook-deduplication','horizontal-scaling','autoscaling','declarative-deployments','organizations','rbac','environments','services','encrypted-secrets','audit-logs','usage-metering','persistent-volumes','postgresql','redis','preview-environments']}));
 await registerAuthRoutes(app);
 await registerDeploymentHistoryRoutes(app);
+await registerPlatformRoutes(app);
 app.get('/api/v1/projects',async()=>listProjects());
 app.post('/api/v1/projects',async(req,reply)=>{const body=z.object({name:z.string().min(1).max(100),repo:z.string().url().optional()}).parse(req.body);const project={id:randomUUID(),...body,createdAt:new Date().toISOString()};await createProject(project);return reply.code(201).send(project);});
 app.get('/api/v1/deployments',async()=>listDeployments());
@@ -34,4 +38,5 @@ app.post('/api/v1/deployments',async(req,reply)=>{const body=z.object({projectId
 function verifyGithubSignature(payload:string,signature:string|undefined){const secret=process.env.GITHUB_WEBHOOK_SECRET;if(!secret||!signature?.startsWith('sha256='))return false;const expected=createHmac('sha256',secret).update(payload).digest('hex');const provided=signature.slice(7);if(provided.length!==expected.length)return false;return timingSafeEqual(Buffer.from(provided),Buffer.from(expected));}
 app.post('/api/webhooks/github',{config:{rawBody:true}},async(req,reply)=>{const raw=(req as typeof req & {rawBody?:string}).rawBody??JSON.stringify(req.body??{});if(!verifyGithubSignature(raw,req.headers['x-hub-signature-256'] as string|undefined))return reply.code(401).send({error:'Invalid GitHub webhook signature'});const event=String(req.headers['x-github-event']??'');const delivery=String(req.headers['x-github-delivery']??'');if(event!=='push')return reply.send({accepted:true,ignored:true,event});if(delivery&&!(await claimGithubDelivery(delivery)))return reply.send({accepted:true,duplicate:true,event,delivery});const payload=req.body as any;const repo=payload.repository?.clone_url as string|undefined;const ref=String(payload.ref??'').replace(/^refs\/heads\//,'');if(!repo||!ref)return reply.code(400).send({error:'GitHub push payload missing repository/ref'});let project=await findProjectByRepo(repo);if(!project){project={id:randomUUID(),name:String(payload.repository?.name??'github-project'),repo,createdAt:new Date().toISOString()};await createProject(project);}const response=await fetch(`http://127.0.0.1:${process.env.PORT??4000}/api/v1/deployments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({projectId:project.id,repo,ref,containerPort:80})});return reply.code(response.ok?202:502).send({accepted:response.ok,deployment:await response.json()});});
 await initDb();
+await ensurePlatformSchema();
 await app.listen({host:'0.0.0.0',port:Number(process.env.PORT??4000)});
