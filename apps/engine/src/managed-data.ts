@@ -19,11 +19,11 @@ export async function provisionManagedData(input:{instanceId:string;engine:'post
   const env=input.engine==='postgres'?[`POSTGRES_USER=nexus`,`POSTGRES_PASSWORD=${password}`,`POSTGRES_DB=${dbName}`]:[];
   const binds=input.engine==='postgres'?[`nexus-data-${safe}:/var/lib/postgresql/data`]:[`nexus-data-${safe}:/data`];
   const cmd=input.engine==='redis'?['redis-server','--appendonly','yes','--requirepass',password]:undefined;
-  const container=await docker.createContainer({name:containerName,image,Env:env,Cmd:cmd,HostConfig:{RestartPolicy:{Name:'unless-stopped'},Binds:binds,PortBindings:input.engine==='postgres'?{'5432/tcp':[ {HostPort:String(port)} ]}:{'6379/tcp':[ {HostPort:String(port)} ]},Memory:512*1024*1024,PidsLimit:256},ExposedPorts:input.engine==='postgres'?{'5432/tcp':{}}:{'6379/tcp':{}}});
+  const container=await docker.createContainer({name:containerName,Image:image,Env:env,Cmd:cmd,HostConfig:{RestartPolicy:{Name:'unless-stopped'},Binds:binds,PortBindings:input.engine==='postgres'?{'5432/tcp':[ {HostPort:String(port)} ]}:{'6379/tcp':[ {HostPort:String(port)} ]},Memory:512*1024*1024,PidsLimit:256},ExposedPorts:input.engine==='postgres'?{'5432/tcp':{}}:{'6379/tcp':{}}});
   await container.start();
   try{await docker.getNetwork(networkId).connect({Container:container.id});}catch{}
   const endpoint=`${process.env.PUBLIC_ENGINE_HOST||'127.0.0.1'}:${port}`;
   const connectionUri=input.engine==='postgres'?`postgresql://nexus:${encodeURIComponent(password)}@${endpoint}/${dbName}`:`redis://:${encodeURIComponent(password)}@${endpoint}`;
-  return {containerName,endpoint,connectionUri,port,network:networkName};
+  return {containerName,endpoint,connectionUri,port,network:networkName,nodeName:process.env.NODE_NAME||'local'};
 }
 export async function destroyManagedData(containerName:string){const container=docker.getContainer(containerName);try{await container.stop({t:10});}catch{}try{await container.remove({force:true});}catch{}}
