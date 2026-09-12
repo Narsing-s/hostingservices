@@ -7,9 +7,9 @@
     "studio": "prisma studio"
   },
   "dependencies": {
-    "@prisma/client": "7.10.0"
+    "@prisma/client": "6.19.3"
   },
   "devDependencies": {
-    "prisma": "7.10.0"
+    "prisma": "6.19.3"
   }
 }
