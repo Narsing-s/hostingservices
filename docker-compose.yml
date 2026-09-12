@@ -9,7 +9,9 @@ services:
       target: api
     restart: unless-stopped
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      # Local Compose must be development by default. Production deployments
+      # must explicitly set NODE_ENV=production and provide HTTPS URLs/secrets.
+      NODE_ENV: ${NODE_ENV:-development}
       PORT: 4000
       DATABASE_URL: ${DATABASE_URL:-postgres://nexus:nexus_dev_only@postgres:5432/nexus}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
