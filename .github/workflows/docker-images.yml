@@ -29,9 +29,11 @@ jobs:
       matrix:
         include:
           - name: nexus-api
+            dockerfile: apps/api/Dockerfile
             target: api
           - name: nexus-web
-            target: web
+            dockerfile: apps/web/Dockerfile
+            target: runner
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,21 +45,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/api/Dockerfile
+          file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           push: false
           tags: nexus/${{ matrix.name }}:ci
-          cache-from: type=gha,scope=${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
-
-      - name: Build web image
-        if: matrix.target == 'web'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: apps/web/Dockerfile
-          target: runner
-          push: false
           build-args: |
             NEXT_PUBLIC_NEXUS_API_URL=http://localhost:4000
-          tags: nexus/${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
