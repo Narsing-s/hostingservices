@@ -1,218 +1,225 @@
 # Nexus Hosting
 
-**Develop. Preview. Release. Recover. — a provider-neutral developer cloud.**
+**A real developer cloud for deploying, running, scaling and recovering production services.**
 
-Nexus is a Docker-first application platform for shipping **web apps, APIs, workers, cron jobs, private services, containers, PostgreSQL and Redis** from one control plane.
+Nexus is a Docker-first hosting platform for **web apps, APIs, workers, cron jobs, private services, custom containers, PostgreSQL and Redis**. The product is designed around the same core expectations developers have from modern platforms such as Render, Railway and similar developer clouds: connect a repository, configure a service, deploy, get a public URL, inspect logs, scale, attach a domain, and roll back safely.
 
-It takes inspiration from proven platform capabilities such as previews, deployment checks, immutable releases, instant rollback and version-safe deployments, but Nexus is **not a Vercel clone**. Its core is an application graph, portable Docker runtime, multi-service releases, recovery points, cost-aware placement and provider-neutral infrastructure.
+Nexus is provider-neutral and keeps its own application graph, release controller, runtime engine and recovery model.
 
 [![CI](https://github.com/Narsing-s/hostingservices/actions/workflows/ci.yml/badge.svg)](https://github.com/Narsing-s/hostingservices/actions/workflows/ci.yml)
 [![Production Quality Gates](https://github.com/Narsing-s/hostingservices/actions/workflows/production-quality.yml/badge.svg)](https://github.com/Narsing-s/hostingservices/actions/workflows/production-quality.yml)
+[![Production Security Gate](https://github.com/Narsing-s/hostingservices/actions/workflows/production-security-gate.yml/badge.svg)](https://github.com/Narsing-s/hostingservices/actions/workflows/production-security-gate.yml)
 [![Local Compose Smoke](https://github.com/Narsing-s/hostingservices/actions/workflows/local-compose-smoke.yml/badge.svg)](https://github.com/Narsing-s/hostingservices/actions/workflows/local-compose-smoke.yml)
 
-> **Product truth:** Nexus is an active platform project, not a claim that every planned capability is production-ready today. A capability is production-ready only when its backend contract, UI workflow, failure path, observability, security controls, and automated tests all work together.
+> **Product truth:** Nexus must only display a service as Live when the platform has evidence that the selected deployment generation is healthy and receiving the intended traffic. A green UI alone is not production proof.
 
-## Why Nexus
+## What makes Nexus a real hosting service
 
-| Platform concern | Nexus approach |
+| Developer need | Nexus implementation |
 |---|---|
-| Deploy | Git repository or Docker image |
-| Preview | Isolated preview environments and deployment graphs |
-| Release | Rolling, blue/green and canary strategies |
-| Safety | Health-gated traffic, rollback and release gates |
-| Reliability | Recovery points, durable state and runtime-node failover |
-| Version safety | Deployment generations and session-safe release pinning |
-| Runtime | Docker-first web, worker, cron and private services |
-| Infrastructure | PostgreSQL, Redis, persistent volumes and runtime nodes |
+| Deploy from Git | Git repository, branch/ref and service selection |
+| Deploy containers | Existing Docker image or Dockerfile |
+| Automatic builds | Node.js, Python, Go, Java, Rust, .NET, PHP and Ruby detection |
+| Public services | HTTP routing, ports, health checks and domains |
+| Background workloads | Workers and private services |
+| Scheduled workloads | Cron/job-oriented deployment contracts |
+| Databases | PostgreSQL and Redis managed-data foundations |
+| Persistent data | Managed named volumes and backup/restore architecture |
+| Previews | Isolated preview environments and deployment graphs |
+| Releases | Rolling, blue/green and canary strategies |
+| Safe promotion | Build, security, smoke and health release gates |
+| Rollback | Known-good generation/recovery point without rebuilding the old artifact |
 | Scaling | CPU, memory, request-rate and queue-aware autoscaling contracts |
-| Observability | Logs, metrics, deployment activity and usage metering |
-| Security | RBAC, scoped tokens, encrypted secrets and audit logs |
-| Portability | Provider abstraction plus declarative `nexus.yaml` |
+| Networking | Private service networking and runtime isolation |
+| Domains | Ownership verification and TLS/ACME integration |
+| Secrets | Encrypted secrets and scoped access |
+| Teams | Organizations, memberships, RBAC and API tokens |
+| Observability | Logs, metrics, deployment events and usage metering |
+| Automation | CLI, declarative `nexus.yaml`, GitHub integration and webhooks |
+| Reliability | Durable deployment state, queue retries and runtime-node recovery |
+| Security | Non-privileged containers, dropped capabilities, no-new-privileges, resource limits and production configuration validation |
 
-## The Nexus release model
+## Deploy like a modern developer cloud
 
-```text
-                    ┌───────────────┐
-Git / Image ───────▶│ Build         │
-                    └───────┬───────┘
-                            ▼
-                    ┌───────────────┐
-                    │ Release Gates │
-                    │ checks • scan  │
-                    │ health • smoke │
-                    └───────┬───────┘
-                            ▼
-                    ┌───────────────┐
-                    │ Candidate     │
-                    │ isolated      │
-                    └───────┬───────┘
-                            ▼
-                 ┌─────────────────────┐
-                 │ Adaptive Release     │
-                 │ 1% → 5% → 25% →     │
-                 │ 50% → 100%           │
-                 └─────────┬────────────┘
-                           ▼
-                 ┌─────────────────────┐
-                 │ Live + Version Safe │
-                 └─────────┬───────────┘
-                           │
-             bad signals ─┴─▶ Pause / Rollback
-```
-
-A deployment is treated as an immutable generation. Nexus can keep a candidate isolated, evaluate release evidence, shift traffic gradually and recover without requiring a rebuild of the previous version.
-
-See [`docs/ADVANCED_PLATFORM_FEATURES.md`](docs/ADVANCED_PLATFORM_FEATURES.md) for the complete advanced-platform roadmap.
-
-## What Nexus can host
-
-Nexus accepts either a Git repository or an existing Docker image.
-
-| Workload | Support |
-|---|---|
-| Static frontend | Vite, Astro, Angular and Node build outputs |
-| Next.js / Node.js | Automatic Docker build or custom Dockerfile |
-| REST / GraphQL / backend APIs | Public web service |
-| Python | Flask/FastAPI/Django-style deployments |
-| Go | `go.mod` projects |
-| Java | Maven and Gradle projects |
-| Rust | Cargo projects |
-| .NET | `.csproj` projects |
-| PHP | Composer projects |
-| Ruby | Gemfile/Rails-style projects |
-| Custom runtimes | Dockerfile or Docker image |
-| Workers | Long-running private/background processes |
-| Cron/jobs | Process workloads with job-oriented health mode |
-| Private services | Internal service-to-service workloads |
-| Managed data | Docker-backed PostgreSQL and Redis with persistent named volumes and generated credentials |
-
-A repository-provided **Dockerfile always wins** over automatic detection. This supports unusual frameworks, monorepos and custom operating-system dependencies.
-
-## Production capabilities
-
-- Application graph for services, databases, caches and dependencies
-- Git repository and Docker image deployments
-- Persisted deployment lifecycle with validated state transitions
-- Rolling, blue/green and canary deployment contracts
-- Health-gated traffic switching and rollback
-- Release gates for build, security, health, smoke and operational evidence
-- Deployment Inspector data for release, runtime, traffic and rollback state
-- Preview environments with environment isolation
-- PostgreSQL and Redis managed-data foundations
-- Recovery points and restore contracts
-- Persistent volumes and backup/restore architecture
-- Encrypted secrets, RBAC, scoped API tokens and audit events
-- Structured logs, metrics and OpenTelemetry-compatible observability contracts
-- Server-side usage metering and cost estimation
-- Provider abstraction for Docker now and Kubernetes/cloud providers later
-- Nexus Autopilot contracts for evidence-based incident diagnosis/remediation
-- CLI and declarative `nexus.yaml` deployment model
-- Production quality gates for contracts, Docker configuration and security scanning
-
-## Advanced platform direction
-
-### 1. Release Gates
-
-Production traffic should never move merely because a container started. Nexus evaluates configurable gates such as build success, security checks, health, smoke tests, latency, error rate, required GitHub checks and optional human approval.
-
-### 2. Version-safe releases
-
-Nexus is designed to prevent an older browser session from accidentally talking to a newer incompatible application generation during a rollout. Deployment IDs can be carried through the request lifecycle and expire with deployment retention.
-
-### 3. Adaptive canary
-
-Nexus can begin with a small percentage of traffic and advance only when live evidence is healthy. Unlike a fixed rollout, the release controller can pause or roll back when error rate, latency, health failures, restarts or resource pressure cross configured thresholds.
-
-### 4. Application-graph previews
-
-A preview is more than a URL. A future Nexus preview can contain a matching web service, API, worker and database generation with deployment-scoped private service bindings.
-
-### 5. Build intelligence
-
-Nexus is designed to evolve toward immutable content-addressed build artifacts keyed by source tree, lockfile, runtime, build command and environment fingerprint. Clean builds should invalidate a build intentionally without destroying reusable cache entries.
-
-### 6. Preview protection
-
-Preview environments can be public, organization-only or protected by short-lived signed access. Authentication material stays server-side.
-
-### 7. Provider-neutral runtime
-
-Infrastructure providers remain implementation details behind common contracts for build, artifact storage, execution, routing, domains/TLS, databases, object storage, secrets and observability. This keeps Nexus portable instead of locking the product to one vendor.
-
-## Runtime features
-
-- Git clone + branch/ref builds
-- Docker image deployment
-- Automatic runtime detection
-- Custom start commands
-- Environment variables and encrypted secrets
-- Web, worker, cron and private service modes
-- PostgreSQL and Redis provisioning
-- HTTP, Docker and process health checks
-- Ephemeral candidate ports for safe health probing
-- CPU, memory, PID and volume resource limits
-- Traefik routing and custom domains
-- DNS ownership verification
-- TLS/ACME configuration
-- Durable Redis deployment queue
-- Idempotent deployment requests
-- Deployment lifecycle callbacks
-- Runtime logs
-- Runtime node registry and capacity reporting
-- API tokens with scopes, expiry and revocation
-- Organization/RBAC model
-- Audit logs and usage metering
-- Infrastructure control center at `/platform`
-- Declarative `nexus.yaml` validation and deployment through the CLI
-
-## Architecture
+Typical flow:
 
 ```text
-                          Nexus Console
-                         Next.js / Web UI
-                               │
-                               ▼
-                     ┌────────────────────┐
-                     │     Nexus API      │
-                     │ Fastify + Postgres │
-                     └─────────┬──────────┘
-                               │
-                  deploy / inspect / release
-                               │
-              ┌────────────────┴────────────────┐
-              ▼                                 ▼
-       Release Controller                 Application Graph
-       gates • rollout                    web • api • worker
-       health • rollback                  cron • data • private
-              │                                 │
-              └────────────────┬────────────────┘
-                               ▼
-                       Nexus Runtime Engine
-                       Docker + BullMQ
-                               │
-                 ┌─────────────┴─────────────┐
-                 ▼                           ▼
-           Runtime nodes                Managed data
-           containers                   PostgreSQL/Redis
-                 │                           │
-                 └─────────────┬─────────────┘
-                               ▼
-                            Traefik
-                               │
-                               ▼
-                           Internet
+Connect GitHub/Git repository
+        │
+        ▼
+Create project → Create service
+        │
+        ├── Runtime: auto-detect / Dockerfile / image
+        ├── Build: command + environment + secrets
+        ├── Start: command + port + health check
+        ├── Resources: CPU + memory + replicas
+        ├── Networking: public/private
+        └── Domain: generated URL or custom domain
+        │
+        ▼
+Build → Security gates → Candidate → Health check
+        │
+        ▼
+Rolling / Blue-Green / Canary promotion
+        │
+        ▼
+Live URL + Logs + Metrics + Deployment history
+        │
+        └── failure → pause / rollback / recovery point
 ```
+
+A deployment is represented as a generation. Builds now record the source commit and Docker immutable image ID; when a registry digest is available it is also captured. This prevents a release system from treating a mutable image tag as the only identity of a production artifact.
+
+## Supported workloads
+
+- Static frontends: Vite, Astro, Angular and Node build outputs
+- Node.js / Next.js / API services
+- Python / Flask / FastAPI / Django-style services
+- Go
+- Java Maven / Gradle
+- Rust
+- .NET
+- PHP / Composer
+- Ruby / Rails-style applications
+- Any custom Dockerfile
+- Existing Docker images
+- Long-running workers
+- Cron and scheduled jobs
+- Private internal services
+- PostgreSQL
+- Redis
+
+For monorepos, Nexus can select a service directory containing its own Dockerfile. A repository-provided Dockerfile takes precedence over automatic runtime generation.
+
+## Production architecture
+
+```text
+                       Nexus Console
+                       Next.js Web UI
+                            │
+                            ▼
+                    ┌───────────────┐
+                    │   Nexus API   │
+                    │ Fastify/PG    │
+                    └───────┬───────┘
+                            │
+                ┌───────────┼───────────┐
+                ▼           ▼           ▼
+           Auth/RBAC    Release      Platform
+           Tenants      Controller   Services
+                │           │           │
+                └───────────┼───────────┘
+                            ▼
+                    Durable Redis Queue
+                            │
+                            ▼
+                     Runtime Engine
+                       Docker nodes
+                            │
+             ┌──────────────┼──────────────┐
+             ▼              ▼              ▼
+          Web/API         Workers        Private
+             │              │              │
+             └──────────────┼──────────────┘
+                            ▼
+                      Traefik / Router
+                            │
+                     Internet / TLS
+
+          ┌─────────────────────────────────┐
+          │ PostgreSQL / Redis / Volumes    │
+          │ Backups / Recovery / Metering  │
+          └─────────────────────────────────┘
+```
+
+The runtime boundary is hardened by default: production containers are non-privileged, all Linux capabilities are dropped, `no-new-privileges` is enabled, CPU/memory/PID limits are supported, and arbitrary host filesystem binds are disabled unless explicitly overridden for controlled infrastructure use.
+
+## Immutable builds and provenance
+
+A Git deployment should be reproducible enough to answer:
+
+- Which repository was built?
+- Which ref was requested?
+- Which source commit was actually cloned?
+- Which generated or supplied Dockerfile was used?
+- Which immutable Docker image ID was produced?
+- Which registry digest was available?
+- Which deployment/generation consumed the artifact?
+
+Nexus captures the source commit and image identity during the build. A registry digest is captured when the image has already been associated with a registry digest. The next promotion layer should prefer immutable digests over mutable tags.
+
+## Release safety
+
+Nexus supports:
+
+- Rolling releases
+- Blue/green releases
+- Canary releases
+- Health-gated promotion
+- Smoke-test gates
+- Security gates
+- Required external checks
+- Durable deployment generations
+- Recovery points
+- Rollback without rebuilding a known-good artifact
+- Deployment event history
+- Failure diagnosis and recovery contracts
+
+A production deployment is not considered complete just because `docker run` succeeded.
+
+## Networking and domains
+
+Production service networking should separate public traffic from internal control-plane traffic. Public services are routed through the configured ingress/router, while private services communicate through the runtime network.
+
+Domains follow an ownership-verification workflow before being treated as verified. TLS/ACME automation is part of the production platform contract and must be backed by a real certificate provider in a hosted environment.
+
+## Data services
+
+PostgreSQL and Redis are treated as stateful services rather than disposable application containers. Production operation requires:
+
+- Persistent storage
+- Credentials managed as secrets
+- Health checks
+- Backup retention
+- Restore verification
+- Deletion protection where appropriate
+- Resource quotas
+- Recovery procedures
+
+See [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md) and [`docs/PRODUCTION-SERVICES.md`](docs/PRODUCTION-SERVICES.md).
+
+## Security model
+
+Production configuration rejects insecure placeholder secrets and localhost public URLs. User workloads run with runtime hardening enabled. API access is expected to be tenant-scoped and authenticated, and privileged operations require authorization.
+
+See [`docs/SECURITY-RUNTIME-HARDENING.md`](docs/SECURITY-RUNTIME-HARDENING.md) and [`docs/PRODUCTION-SERVICES.md`](docs/PRODUCTION-SERVICES.md).
 
 ## Declarative deployments
-
-The Nexus CLI can validate and submit a repository deployment from `nexus.yaml`:
 
 ```bash
 nexus validate nexus.yaml
 nexus deploy nexus.yaml
 ```
 
-See [`docs/NEXUS_YAML.md`](docs/NEXUS_YAML.md) for the manifest contract, monorepo service selection, environment variables and secret-handling rules.
+Example concept:
+
+```yaml
+services:
+  api:
+    type: web
+    repo: https://github.com/example/api
+    branch: main
+    build: npm ci && npm run build
+    start: npm start
+    port: 3000
+    healthCheck:
+      path: /health
+    resources:
+      cpu: 500m
+      memory: 512Mi
+```
+
+See [`docs/NEXUS_YAML.md`](docs/NEXUS_YAML.md).
 
 ## Local development
 
@@ -224,7 +231,7 @@ npm run dev:engine
 npm run dev
 ```
 
-For a full local platform verification:
+Full local platform check:
 
 ```bash
 docker compose config
@@ -232,48 +239,59 @@ docker compose build --no-cache api web engine agent
 docker compose up -d
 ```
 
-Then verify API, engine, agent and web health before using the console. If port `4000` is already occupied, stop the previous Nexus API process before starting another copy.
+Then verify API, engine, agent, Postgres and Redis health before creating deployments.
 
-The CLI can be linked locally with:
+## Production deployment requirements
 
-```bash
-npm run cli:link
-```
-
-Then use `nexus --help`.
-
-## Production configuration
-
-The web console must point at the public Nexus API. In a hosted deployment, set:
+Set real hosted values for at least:
 
 ```text
-NEXT_PUBLIC_NEXUS_API_URL=https://<your-public-api-domain>
+DATABASE_URL
+AUTH_SECRET
+ENGINE_INTERNAL_SECRET
+ENGINE_CALLBACK_SECRET
+SECRETS_ENCRYPTION_KEY
+WEB_URL=https://<console-domain>
+PUBLIC_API_URL=https://<api-domain>
+ENGINE_URL=https://<engine-control-domain>
+NEXT_PUBLIC_NEXUS_API_URL=https://<api-domain>
 ```
 
-Do not use `http://localhost:4000` in a production frontend. OAuth secrets remain server-side; users only select their GitHub or Google account and are redirected through the configured provider.
+Do not use localhost URLs or development placeholder secrets in production. OAuth provider credentials, registry credentials, TLS credentials and cloud-provider credentials must remain server-side.
 
-## Production-readiness standard
+## Production roadmap
 
-Nexus uses a stricter definition of done than “the page loaded”. A capability must work end-to-end across UI → API → durable state → queue/engine → runtime → routing → observability, including failure and rollback paths.
+Nexus is being built toward a complete hosted control plane rather than a mock dashboard. The remaining production work is tracked explicitly:
 
-See [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md) and [`docs/PLATFORM-GAP-MATRIX.md`](docs/PLATFORM-GAP-MATRIX.md) for the acceptance criteria and market capability matrix.
+1. Tenant isolation and authorization on every project/service/deployment resource.
+2. Immutable artifact records and digest-only promotion where registry digests exist.
+3. SSRF-safe Git/provider/webhook networking and explicit outbound egress policy.
+4. Preview expiry and automatic cleanup.
+5. Signed webhook delivery with retries and idempotency.
+6. Real managed PostgreSQL/Redis providers with backup/restore verification.
+7. Billing, usage reconciliation and hard quota admission.
+8. Multi-region scheduling and failover.
+9. Production SLOs, alerting and incident workflows.
+10. Real provider acceptance tests against a disposable production-like environment.
 
-## Community and open source
-
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — development and review standards
-- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — community expectations
-- [`SECURITY.md`](SECURITY.md) — responsible vulnerability reporting
-- [`SUPPORT.md`](SUPPORT.md) — troubleshooting and operational support
-- [`LICENSE`](LICENSE) — Apache License 2.0
+See [`docs/PLATFORM-GAP-MATRIX.md`](docs/PLATFORM-GAP-MATRIX.md) and [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md).
 
 ## Documentation
 
-- [`docs/PRODUCTION_PLATFORM.md`](docs/PRODUCTION_PLATFORM.md) — production contract
-- [`docs/ADVANCED_PLATFORM_FEATURES.md`](docs/ADVANCED_PLATFORM_FEATURES.md) — advanced release and platform roadmap
-- [`docs/PLATFORM-GAP-MATRIX.md`](docs/PLATFORM-GAP-MATRIX.md) — product capability and competitive acceptance matrix
-- [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md) — end-to-end production checklist
+- [`docs/PRODUCTION-SERVICES.md`](docs/PRODUCTION-SERVICES.md) — how Nexus maps to a real hosted-service product
+- [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md) — production acceptance checklist
+- [`docs/SECURITY-RUNTIME-HARDENING.md`](docs/SECURITY-RUNTIME-HARDENING.md) — runtime security boundary
+- [`docs/PRODUCTION_PLATFORM.md`](docs/PRODUCTION_PLATFORM.md) — platform contract
+- [`docs/ADVANCED_PLATFORM_FEATURES.md`](docs/ADVANCED_PLATFORM_FEATURES.md) — release and platform capabilities
+- [`docs/PLATFORM-GAP-MATRIX.md`](docs/PLATFORM-GAP-MATRIX.md) — capability/competitive acceptance matrix
 - [`docs/NEXUS_YAML.md`](docs/NEXUS_YAML.md) — declarative deployment model
 
-## Design principle
+## Community
 
-**Learn from the platform industry; do not clone it.** Nexus adopts useful deployment and developer-experience patterns while keeping its own application graph, portable runtime, recovery model, release intelligence and provider-neutral architecture.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- [`SECURITY.md`](SECURITY.md)
+- [`SUPPORT.md`](SUPPORT.md)
+- [`LICENSE`](LICENSE)
+
+**Nexus principle: deploy real software, prove real health, keep releases recoverable.**
