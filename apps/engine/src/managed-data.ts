@@ -5,7 +5,7 @@ const docker = process.platform === 'win32' ? new Docker({ socketPath: '\\\\.\\p
 const networkName = process.env.RUNTIME_NETWORK ?? 'nexus-runtime';
 const secret=(size=24)=>randomBytes(size).toString('base64url');
 const hostPort=()=>20000+Math.floor(Math.random()*9000);
-async function ensureNetwork(){const found=(await docker.listNetworks({filters:{name:[networkName]}}))[0];if(found)return found.Id;return (await docker.createNetwork({Name:networkName,Driver:'bridge'})).Id;}
+async function ensureNetwork(){const found=(await docker.listNetworks({filters:{name:[networkName]}}))[0];if(found)return found.id;return (await docker.createNetwork({Name:networkName,Driver:'bridge'})).id;}
 
 export async function provisionManagedData(input:{instanceId:string;engine:'postgres'|'redis';version?:string;name?:string}){
   const networkId=await ensureNetwork();
