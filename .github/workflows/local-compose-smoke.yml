@@ -62,6 +62,34 @@ jobs:
           curl --fail --show-error --silent http://127.0.0.1:4000/api/auth/providers | tee /tmp/providers.json
           ! grep -E 'CLIENT_(ID|SECRET)|SECRET|TOKEN' /tmp/providers.json
 
+      - name: Verify real runtime deployment path
+        shell: bash
+        run: |
+          set -euo pipefail
+          SECRET=$(node -e "const c=require('crypto'); console.log(c.createHmac('sha256','local-engine-internal-secret').update('nexus-engine').digest('hex'))")
+          DEPLOYMENT_ID="smoke-${GITHUB_RUN_ID}"
+          PAYLOAD=$(node -e 'console.log(JSON.stringify({name:"nexus-smoke",image:"node:20-bookworm-slim",deploymentId:process.env.DEPLOYMENT_ID,containerPort:3000,public:false,healthMode:"process",command:["node","-e","setInterval(()=>{}, 1000)"]}))' )
+          response=$(curl --fail --show-error --silent \
+            -X POST http://127.0.0.1:4100/api/v1/runtime/deploy \
+            -H "content-type: application/json" \
+            -H "x-engine-secret: $SECRET" \
+            -H "Idempotency-Key: smoke-${GITHUB_RUN_ID}" \
+            -d "$PAYLOAD")
+          echo "$response"
+          echo "$response" | grep -q '"accepted":true'
+          for i in {1..30}; do
+            containers=$(curl --fail --show-error --silent \
+              -H "x-engine-secret: $SECRET" \
+              http://127.0.0.1:4100/api/v1/runtime/containers)
+            if echo "$containers" | grep -q 'nexus-smoke'; then
+              echo "$containers"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs --tail=300 engine
+          exit 1
+
       - name: Show service status
         if: always()
         run: docker compose ps
