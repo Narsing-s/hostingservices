@@ -8,6 +8,9 @@ export type DeploymentJob = {
   deploymentId?: string;
   containerPort?: number;
   hostPort?: number;
+  replicas?: number;
+  zeroDowntime?: boolean;
+  rollbackOnFailure?: boolean;
   env?: Record<string, string>;
   command?: string[];
   healthMode?: 'auto' | 'http' | 'docker' | 'process';
