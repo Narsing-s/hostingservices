@@ -3,7 +3,34 @@ import { ensureMarketSchema } from './market-schema.js';
 const {Pool}=pg;
 const pool=new Pool({connectionString:process.env.DATABASE_URL??'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus'});
 
-export async function ensureQuotaSchema(){await pool.query(`CREATE TABLE IF NOT EXISTS organization_quotas(organization_id uuid PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,max_services integer NOT NULL DEFAULT 25,max_projects integer NOT NULL DEFAULT 10,max_runtime_cpu_millis integer NOT NULL DEFAULT 4000,max_runtime_memory_bytes bigint NOT NULL DEFAULT 4294967296,max_storage_bytes bigint NOT NULL DEFAULT 107374182400,max_members integer NOT NULL DEFAULT 10,updated_at timestamptz NOT NULL DEFAULT now());`);await ensureMarketSchema()}
+export async function ensureQuotaSchema(){await pool.query(`CREATE TABLE IF NOT EXISTS organization_quotas(organization_id uuid PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,max_services integer NOT NULL DEFAULT 25,max_projects integer NOT NULL DEFAULT 10,max_runtime_cpu_millis integer NOT NULL DEFAULT 4000,max_runtime_memory_bytes bigint NOT NULL DEFAULT 4294967296,max_storage_bytes bigint NOT NULL DEFAULT 107374182400,max_members integer NOT NULL DEFAULT 10,updated_at timestamptz NOT NULL DEFAULT now());
+CREATE OR REPLACE FUNCTION enforce_deployment_resource_quota() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE org_id uuid; quota record; requested_cpu bigint; requested_memory bigint; used_cpu bigint; used_memory bigint;
+BEGIN
+  SELECT organization_id INTO org_id FROM projects WHERE id=NEW.project_id;
+  IF org_id IS NULL THEN
+    IF current_setting('app.environment',true)='production' THEN RAISE EXCEPTION 'Project is not attached to an organization'; END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.runtime IS NULL OR NEW.status IN ('failed','rolled_back') THEN RETURN NEW; END IF;
+  SELECT * INTO quota FROM organization_quotas WHERE organization_id=org_id FOR UPDATE;
+  IF NOT FOUND THEN
+    INSERT INTO organization_quotas(organization_id) VALUES(org_id) ON CONFLICT DO NOTHING;
+    SELECT * INTO quota FROM organization_quotas WHERE organization_id=org_id FOR UPDATE;
+  END IF;
+  requested_cpu:=GREATEST(0,COALESCE((NEW.runtime->>'cpuNanoCpus')::bigint,0)/1000000);
+  requested_memory:=GREATEST(0,COALESCE((NEW.runtime->>'memoryBytes')::bigint,0));
+  SELECT COALESCE(SUM(GREATEST(0,COALESCE((d.runtime->>'cpuNanoCpus')::bigint,0)/1000000)),0),COALESCE(SUM(GREATEST(0,COALESCE((d.runtime->>'memoryBytes')::bigint,0))),0)
+    INTO used_cpu,used_memory
+    FROM deployments d JOIN projects p ON p.id=d.project_id
+   WHERE p.organization_id=org_id AND d.id<>NEW.id AND d.status NOT IN ('failed','rolled_back') AND d.runtime IS NOT NULL;
+  IF requested_cpu<0 OR requested_memory<0 THEN RAISE EXCEPTION 'Invalid deployment resources'; END IF;
+  IF used_cpu+requested_cpu>quota.max_runtime_cpu_millis THEN RAISE EXCEPTION 'CPU quota exceeded (% millicores)',quota.max_runtime_cpu_millis; END IF;
+  IF used_memory+requested_memory>quota.max_runtime_memory_bytes THEN RAISE EXCEPTION 'Memory quota exceeded (% bytes)',quota.max_runtime_memory_bytes; END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS deployments_resource_quota_guard ON deployments;
+CREATE TRIGGER deployments_resource_quota_guard BEFORE INSERT OR UPDATE OF runtime,status,project_id ON deployments FOR EACH ROW EXECUTE FUNCTION enforce_deployment_resource_quota();`);await ensureMarketSchema()}
 export async function ensureDefaultQuota(orgId:string){await pool.query(`INSERT INTO organization_quotas(organization_id) VALUES($1) ON CONFLICT DO NOTHING`,[orgId])}
 export async function quotaFor(orgId:string){await ensureDefaultQuota(orgId);const {rows}=await pool.query(`SELECT * FROM organization_quotas WHERE organization_id=$1`,[orgId]);return rows[0]}
 export async function organizationIdForProject(projectId:string){const {rows}=await pool.query(`SELECT organization_id AS "organizationId" FROM projects WHERE id=$1`,[projectId]);return rows[0]?.organizationId as string|undefined}
