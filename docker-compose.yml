@@ -29,6 +29,27 @@ services:
       start_period: 15s
     networks: [nexus-runtime]
 
+  engine-worker:
+    build:
+      context: .
+      dockerfile: apps/engine/Dockerfile
+    command: ['node', 'dist/worker.js']
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      NODE_NAME: ${ENGINE_NODE_NAME:-local}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ENGINE_INTERNAL_SECRET: ${ENGINE_INTERNAL_SECRET:-local-engine-internal-secret}
+      DOCKER_SOCKET: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      redis:
+        condition: service_healthy
+      engine:
+        condition: service_healthy
+    networks: [nexus-runtime]
+
   agent:
     build:
       context: .
@@ -84,6 +105,8 @@ services:
         condition: service_healthy
       engine:
         condition: service_healthy
+      engine-worker:
+        condition: service_started
       agent:
         condition: service_healthy
     healthcheck:
@@ -106,6 +129,7 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      NEXUS_API_URL: ${NEXUS_API_URL:-http://api:4000}
     ports:
       - '3000:3000'
     depends_on:
