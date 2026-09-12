@@ -2,6 +2,7 @@ import Docker from 'dockerode';
 import http from 'node:http';
 import { buildFromGit, detectFromGit, getBuildLogs } from './build.js';
 import { enqueueDeployment, queueStats } from './redis-queue.js';
+import { provisionManagedData } from './managed-data.js';
 const docker = process.platform === 'win32' ? new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' }) : new Docker({ socketPath: process.env.DOCKER_SOCKET ?? '/var/run/docker.sock' });
 const port = Number(process.env.PORT ?? 4100);
 type DeployBody = { name: string; image: string; deploymentId?: string; containerPort?: number; hostPort?: number; replicas?: number; zeroDowntime?: boolean; rollbackOnFailure?: boolean; autoscale?: { min: number; max: number; cpuPercent: number; intervalSeconds?: number }; env?: Record<string, string>; command?: string[]; previousImage?: string; healthMode?: 'auto' | 'http' | 'docker' | 'process'; public?: boolean; healthPath?: string; domain?: string; cpuNanoCpus?: number; memoryBytes?: number; pidsLimit?: number; volumeBinds?: string[] };
@@ -14,6 +15,12 @@ async function main(req: http.IncomingMessage, res: http.ServerResponse) {
     if (req.url === '/api/v1/runtime/containers') { send(res, 200, await docker.listContainers({ all: true })); return; }
     if (req.url?.startsWith('/api/v1/runtime/build-logs/')) { const deploymentId = decodeURIComponent(req.url.split('/').pop()!); send(res, 200, { deploymentId, logs: getBuildLogs(deploymentId) }); return; }
     if (req.url === '/api/v1/runtime/detect' && req.method === 'POST') { const body = JSON.parse(await readBody(req)); if (!body.repo) { send(res, 400, { error: 'repo is required' }); return; } send(res, 200, await detectFromGit(body)); return; }
+    if (req.url === '/api/v1/managed-data/provision' && req.method === 'POST') {
+      const body = JSON.parse(await readBody(req)) as {instanceId?:string;engine?:'postgres'|'redis';version?:string;name?:string};
+      if (!body.instanceId || !['postgres','redis'].includes(body.engine||'')) { send(res,400,{error:'instanceId and engine(postgres|redis) are required'}); return; }
+      const result=await provisionManagedData({instanceId:body.instanceId,engine:body.engine!,version:body.version,name:body.name});
+      send(res,201,{ok:true,...result}); return;
+    }
     if ((req.url === '/api/v1/runtime/deploy' || req.url === '/api/v1/runtime/rollback') && req.method === 'POST') {
       const body = JSON.parse(await readBody(req)) as DeployBody; const rollback = req.url.endsWith('/rollback');
       if (!body.name || (!rollback && !body.image) || (rollback && !body.previousImage)) { send(res, 400, { error: rollback ? 'name and previousImage are required' : 'name and image are required' }); return; }
