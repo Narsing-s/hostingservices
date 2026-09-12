@@ -2,11 +2,9 @@ import Docker from 'dockerode';
 import http from 'node:http';
 import { buildFromGit, detectFromGit, getBuildLogs } from './build.js';
 import { enqueueDeployment, queueStats } from './redis-queue.js';
-
 const docker = process.platform === 'win32' ? new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' }) : new Docker({ socketPath: process.env.DOCKER_SOCKET ?? '/var/run/docker.sock' });
 const port = Number(process.env.PORT ?? 4100);
-
-type DeployBody = { name: string; image: string; deploymentId?: string; containerPort?: number; hostPort?: number; replicas?: number; zeroDowntime?: boolean; rollbackOnFailure?: boolean; env?: Record<string, string>; command?: string[]; previousImage?: string; healthMode?: 'auto' | 'http' | 'docker' | 'process'; public?: boolean; healthPath?: string; domain?: string };
+type DeployBody = { name: string; image: string; deploymentId?: string; containerPort?: number; hostPort?: number; replicas?: number; zeroDowntime?: boolean; rollbackOnFailure?: boolean; autoscale?: { min: number; max: number; cpuPercent: number; intervalSeconds?: number }; env?: Record<string, string>; command?: string[]; previousImage?: string; healthMode?: 'auto' | 'http' | 'docker' | 'process'; public?: boolean; healthPath?: string; domain?: string };
 function readBody(req: http.IncomingMessage): Promise<string> { return new Promise((resolve, reject) => { let body = ''; req.on('data', (chunk) => { body += chunk; if (body.length > 1_000_000) req.destroy(new Error('request body too large')); }); req.on('end', () => resolve(body)); req.on('error', reject); }); }
 function send(res: http.ServerResponse, status: number, value: unknown) { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(value)); }
 async function main(req: http.IncomingMessage, res: http.ServerResponse) {
@@ -20,13 +18,14 @@ async function main(req: http.IncomingMessage, res: http.ServerResponse) {
       const body = JSON.parse(await readBody(req)) as DeployBody; const rollback = req.url.endsWith('/rollback');
       if (!body.name || (!rollback && !body.image) || (rollback && !body.previousImage)) { send(res, 400, { error: rollback ? 'name and previousImage are required' : 'name and image are required' }); return; }
       if (body.replicas !== undefined && (!Number.isInteger(body.replicas) || body.replicas < 1 || body.replicas > 20)) { send(res, 400, { error: 'replicas must be an integer between 1 and 20' }); return; }
+      if (body.autoscale && (!Number.isInteger(body.autoscale.min) || !Number.isInteger(body.autoscale.max) || body.autoscale.min < 1 || body.autoscale.max > 20 || body.autoscale.max < body.autoscale.min || body.autoscale.cpuPercent < 1 || body.autoscale.cpuPercent > 100 || (body.autoscale.intervalSeconds !== undefined && (body.autoscale.intervalSeconds < 10 || body.autoscale.intervalSeconds > 300)))) { send(res, 400, { error: 'autoscale must have 1<=min<=max<=20, cpuPercent 1-100 and intervalSeconds 10-300' }); return; }
       if (body.zeroDowntime !== undefined && typeof body.zeroDowntime !== 'boolean') { send(res, 400, { error: 'zeroDowntime must be boolean' }); return; }
       if (body.rollbackOnFailure !== undefined && typeof body.rollbackOnFailure !== 'boolean') { send(res, 400, { error: 'rollbackOnFailure must be boolean' }); return; }
       if (body.command && (!Array.isArray(body.command) || body.command.length > 32 || body.command.some((part) => typeof part !== 'string' || part.length > 2000))) { send(res, 400, { error: 'command must be an array of up to 32 strings' }); return; }
       if (body.healthMode && !['auto', 'http', 'docker', 'process'].includes(body.healthMode)) { send(res, 400, { error: 'invalid healthMode' }); return; }
       const idempotencyKey = req.headers['idempotency-key']?.toString();
       const job = await enqueueDeployment({ operation: rollback ? 'rollback' : 'deploy', ...body }, idempotencyKey);
-      send(res, 202, { accepted: true, queued: true, jobId: job.id, deploymentId: body.deploymentId, name: body.name, replicas: body.replicas ?? 1 }); return;
+      send(res, 202, { accepted: true, queued: true, jobId: job.id, deploymentId: body.deploymentId, name: body.name, replicas: body.replicas ?? 1, autoscale: body.autoscale ?? null }); return;
     }
     if (req.url === '/api/v1/runtime/build' && req.method === 'POST') { const body = JSON.parse(await readBody(req)); if (!body.repo || !body.image) { send(res, 400, { error: 'repo and image are required' }); return; } send(res, 200, await buildFromGit(body)); return; }
     if (req.url?.startsWith('/api/v1/runtime/logs/')) { const name = decodeURIComponent(req.url.split('/').pop()!); const logs = await docker.getContainer(name).logs({ stdout: true, stderr: true, tail: 200 }); send(res, 200, { name, logs: logs.toString() }); return; }
