@@ -2,6 +2,54 @@ include:
   - ./infra/docker/docker-compose.yml
 
 services:
+  engine:
+    build:
+      context: ./apps/engine
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 4100
+      NODE_NAME: ${ENGINE_NODE_NAME:-local}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      ENGINE_INTERNAL_SECRET: ${ENGINE_INTERNAL_SECRET:-local-engine-internal-secret}
+      DOCKER_SOCKET: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - '4100:4100'
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:4100/health']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: [nexus-runtime]
+
+  agent:
+    build:
+      context: ./apps/agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 4200
+      DOCKER_SOCKET: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - '4200:4200'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:4200/health']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [nexus-runtime]
+
   api:
     build:
       context: .
@@ -9,8 +57,6 @@ services:
       target: api
     restart: unless-stopped
     environment:
-      # Local Compose must be development by default. Production deployments
-      # must explicitly set NODE_ENV=production and provide HTTPS URLs/secrets.
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 4000
       DATABASE_URL: ${DATABASE_URL:-postgres://nexus:nexus_dev_only@postgres:5432/nexus}
@@ -35,6 +81,10 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      engine:
+        condition: service_healthy
+      agent:
         condition: service_healthy
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:4000/health']
