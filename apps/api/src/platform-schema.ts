@@ -42,5 +42,22 @@ ALTER TABLE preview_policies ALTER COLUMN mode SET DEFAULT 'team';
 CREATE TABLE IF NOT EXISTS deployment_comments (id uuid PRIMARY KEY,deployment_id uuid NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,user_id uuid REFERENCES users(id) ON DELETE SET NULL,body text NOT NULL CHECK(length(body) BETWEEN 1 AND 4000),created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS deployment_comments_deployment_idx ON deployment_comments(deployment_id,created_at ASC);
 CREATE TABLE IF NOT EXISTS project_settings (project_id uuid PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,settings jsonb NOT NULL DEFAULT '{}',updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS deployment_artifacts (id uuid PRIMARY KEY,deployment_id uuid NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,repository text,ref text,source_commit text,image text NOT NULL,image_id text NOT NULL,digest text,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(deployment_id),UNIQUE(image_id));
+CREATE INDEX IF NOT EXISTS deployment_artifacts_org_created_idx ON deployment_artifacts(organization_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS deployment_artifacts_source_commit_idx ON deployment_artifacts(repository,source_commit);
+CREATE OR REPLACE FUNCTION capture_deployment_artifact() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE artifact jsonb; org_id uuid;
+BEGIN
+  artifact := COALESCE(NEW.runtime->'buildProvenance', NEW.runtime->'artifactProvenance', '{}'::jsonb);
+  IF artifact ? 'imageId' AND NULLIF(artifact->>'imageId','') IS NOT NULL THEN
+    SELECT p.organization_id INTO org_id FROM projects p WHERE p.id=NEW.project_id;
+    INSERT INTO deployment_artifacts(id,deployment_id,organization_id,repository,ref,source_commit,image,image_id,digest,created_at)
+    VALUES(gen_random_uuid(),NEW.id,org_id,NULLIF(artifact->>'repository',''),NULLIF(artifact->>'ref',''),NULLIF(artifact->>'sourceCommit',''),COALESCE(NULLIF(artifact->>'image',''),NEW.image),artifact->>'imageId',NULLIF(artifact->>'digest',''),COALESCE(NULLIF(artifact->>'createdAt','')::timestamptz,NOW()))
+    ON CONFLICT(deployment_id) DO UPDATE SET organization_id=EXCLUDED.organization_id,repository=EXCLUDED.repository,ref=EXCLUDED.ref,source_commit=EXCLUDED.source_commit,image=EXCLUDED.image,image_id=EXCLUDED.image_id,digest=EXCLUDED.digest,created_at=EXCLUDED.created_at;
+  END IF;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS deployments_capture_artifact ON deployments;
+CREATE TRIGGER deployments_capture_artifact AFTER INSERT OR UPDATE OF runtime ON deployments FOR EACH ROW EXECUTE FUNCTION capture_deployment_artifact();
 `); } finally { await pool.end(); }
 }
