@@ -24,6 +24,8 @@ export async function provisionManagedData(input:{instanceId:string;engine:'post
   try{await docker.getNetwork(networkId).connect({Container:container.id});}catch{}
   const endpoint=`${process.env.PUBLIC_ENGINE_HOST||'127.0.0.1'}:${port}`;
   const connectionUri=input.engine==='postgres'?`postgresql://nexus:${encodeURIComponent(password)}@${endpoint}/${dbName}`:`redis://:${encodeURIComponent(password)}@${endpoint}`;
-  return {containerName,endpoint,connectionUri,port,network:networkName,nodeName:process.env.NODE_NAME||'local'};
+  const result={containerName,endpoint,connectionUri,port,network:networkName};
+  Object.defineProperty(result,'nodeName',{value:process.env.NODE_NAME||'local',enumerable:false});
+  return result;
 }
 export async function destroyManagedData(containerName:string){const container=docker.getContainer(containerName);try{await container.stop({t:10});}catch{}try{await container.remove({force:true});}catch{}}
