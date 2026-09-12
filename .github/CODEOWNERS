@@ -1,0 +1,9 @@
+# Default reviewers for platform-wide changes.
+* @Narsing-s
+
+# High-risk areas require owner review.
+/apps/api/ @Narsing-s
+/apps/engine/ @Narsing-s
+/apps/agent/ @Narsing-s
+/infra/ @Narsing-s
+/.github/workflows/ @Narsing-s
