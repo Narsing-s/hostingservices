@@ -1,0 +1,73 @@
+name: Browser E2E
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: browser-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  browser-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start complete Nexus stack
+        run: docker compose up -d --build
+
+      - name: Wait for application services
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in {1..60}; do
+            api=$(curl -fsS http://127.0.0.1:4000/health 2>/dev/null || true)
+            engine=$(curl -fsS http://127.0.0.1:4100/health 2>/dev/null || true)
+            agent=$(curl -fsS http://127.0.0.1:4200/health 2>/dev/null || true)
+            web=$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/ 2>/dev/null || true)
+            if [ -n "$api" ] && [ -n "$engine" ] && [ -n "$agent" ] && [ "$web" = "200" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose ps
+          docker compose logs --tail=300 api engine agent web
+          exit 1
+
+      - name: Install web test dependencies
+        working-directory: apps/web
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser E2E tests
+        working-directory: apps/web
+        env:
+          E2E_BASE_URL: http://127.0.0.1:3000
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-browser-e2e-report
+          path: apps/web/playwright-report/
+          if-no-files-found: ignore
+
+      - name: Collect stack diagnostics
+        if: failure()
+        run: docker compose logs --tail=500 api engine agent web postgres redis
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans
