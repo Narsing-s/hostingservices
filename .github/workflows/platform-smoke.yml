@@ -1,8 +1,10 @@
 name: Platform smoke
+
 on:
   push:
     branches: [feat/production-hosting-platform]
   workflow_dispatch:
+
 jobs:
   smoke:
     runs-on: ubuntu-latest
@@ -21,7 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: 24, cache: npm}
+        with:
+          node-version: 24
       - run: npm install --legacy-peer-deps --force --no-audit --no-fund
       - run: npm run build
         env:
@@ -29,5 +32,6 @@ jobs:
           NODE_ENV: test
           AUTH_SECRET: smoke-secret
           SECRETS_ENCRYPTION_KEY: smoke-encryption-secret
+          ENGINE_INTERNAL_SECRET: smoke-engine-secret
       - name: Validate compose
         run: docker compose -f infra/docker/docker-compose.yml config
