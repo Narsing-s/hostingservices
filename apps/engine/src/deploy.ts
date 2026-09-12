@@ -9,8 +9,19 @@ function dockerClient() {
   if (process.platform === 'win32') return new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' });
   return new Docker({ socketPath: process.env.DOCKER_SOCKET ?? '/var/run/docker.sock' });
 }
-async function ensureNetwork(docker: Docker) { const name = process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime'; const existing = docker.getNetwork(name); try { await existing.inspect(); return existing; } catch { return docker.createNetwork({ Name: name, Driver: 'bridge' }); } }
+async function ensureNetwork(docker: Docker) { const name = process.env.NEXUS_RUNTIME_NETWORK ?? 'nexus-runtime'; const existing = docker.getNetwork(name); try { await existing.inspect(); return existing; } catch { return docker.createNetwork({ Name: name, Driver: 'bridge', Internal: process.env.NEXUS_RUNTIME_NETWORK_INTERNAL === 'true' }); } }
 async function removeContainer(docker: Docker, name: string) { try { const container = docker.getContainer(name); await container.stop({ t: 10 }).catch(() => undefined); await container.remove({ force: true }).catch(() => undefined); } catch {} }
+function safeVolumeBinds(binds: string[] | undefined) {
+  if (!binds?.length) return undefined;
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_RUNTIME_HOST_BINDS !== 'true') throw new Error('Host filesystem binds are disabled in production; use managed volumes');
+  for (const bind of binds) {
+    const parts = bind.split(':');
+    if (parts.length < 2 || parts.length > 3) throw new Error('Invalid volume bind');
+    const source = parts[0];
+    if (!source || source.startsWith('/') || /^[A-Za-z]:[\\/]/.test(source) || source.includes('..')) throw new Error('Unsafe host volume path');
+  }
+  return binds;
+}
 async function createAndStart(docker: Docker, spec: RuntimeSpec, containerName: string, hostPort?: number) {
   const port = spec.containerPort ?? 80;
   await ensureNetwork(docker);
@@ -20,7 +31,8 @@ async function createAndStart(docker: Docker, spec: RuntimeSpec, containerName: 
   if (spec.cpuNanoCpus && spec.cpuNanoCpus > 0) resources.NanoCpus = Math.floor(spec.cpuNanoCpus);
   if (spec.memoryBytes && spec.memoryBytes > 0) resources.Memory = Math.floor(spec.memoryBytes);
   if (spec.pidsLimit && spec.pidsLimit > 0) resources.PidsLimit = Math.floor(spec.pidsLimit);
-  const container = await docker.createContainer({ name: containerName, Image: spec.image, Env: Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`), Cmd: spec.command, ExposedPorts: { [`${port}/tcp`]: {} }, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, ...resources, ...(bindings ? { PortBindings: bindings } : {}), ...(spec.volumeBinds?.length ? { Binds: spec.volumeBinds } : {}) }, NetworkingConfig: { EndpointsConfig: { [networkName]: {} } }, Labels: { 'nexus.managed': 'true', 'nexus.runtime': spec.name, 'nexus.deployment-container': containerName, 'traefik.enable': 'false', 'nexus.public': String(spec.public !== false) } });
+  const binds = safeVolumeBinds(spec.volumeBinds);
+  const container = await docker.createContainer({ name: containerName, Image: spec.image, Env: Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`), Cmd: spec.command, ExposedPorts: { [`${port}/tcp`]: {} }, HostConfig: { RestartPolicy: { Name: 'unless-stopped' }, ...resources, Privileged: false, ReadonlyRootfs: process.env.RUNTIME_READONLY_ROOTFS === 'true', CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges:true'], ...(bindings ? { PortBindings: bindings } : {}), ...(binds?.length ? { Binds: binds } : {}) }, NetworkingConfig: { EndpointsConfig: { [networkName]: {} } }, Labels: { 'nexus.managed': 'true', 'nexus.runtime': spec.name, 'nexus.deployment-container': containerName, 'traefik.enable': 'false', 'nexus.public': String(spec.public !== false) } });
   await container.start();
   return container;
 }
