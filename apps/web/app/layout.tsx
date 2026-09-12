@@ -1,4 +1,5 @@
 import './globals.css';
+import './platform/platform.css';
 import type { Metadata } from 'next';
 import DeployNavigation from './deploy-navigation';
 import HostedApiBridge from './hosted-api-bridge';
