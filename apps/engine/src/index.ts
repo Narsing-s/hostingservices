@@ -6,23 +6,24 @@ import { provisionManagedData } from './managed-data.js';
 import { verifyInternalSecret } from './node-auth.js';
 const docker = process.platform === 'win32' ? new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' }) : new Docker({ socketPath: process.env.DOCKER_SOCKET ?? '/var/run/docker.sock' });
 const port = Number(process.env.PORT ?? 4100);
-type DeployBody = { name: string; image: string; deploymentId?: string; containerPort?: number; hostPort?: number; replicas?: number; zeroDowntime?: boolean; rollbackOnFailure?: boolean; autoscale?: { min: number; max: number; cpuPercent: number; intervalSeconds?: number }; env?: Record<string, string>; command?: string[]; previousImage?: string; healthMode?: 'auto' | 'http' | 'docker' | 'process'; public?: boolean; healthPath?: string; domain?: string; cpuNanoCpus?: number; memoryBytes?: number; pidsLimit?: number; volumeBinds?: string[] };
+const nodeName = process.env.NODE_NAME ?? 'local';
+type DeployBody = { name: string; image: string; nodeName?: string; deploymentId?: string; containerPort?: number; hostPort?: number; replicas?: number; zeroDowntime?: boolean; rollbackOnFailure?: boolean; autoscale?: { min: number; max: number; cpuPercent: number; intervalSeconds?: number }; env?: Record<string, string>; command?: string[]; previousImage?: string; healthMode?: 'auto' | 'http' | 'docker' | 'process'; public?: boolean; healthPath?: string; domain?: string; cpuNanoCpus?: number; memoryBytes?: number; pidsLimit?: number; volumeBinds?: string[] };
 function readBody(req: http.IncomingMessage): Promise<string> { return new Promise((resolve, reject) => { let body = ''; req.on('data', (chunk) => { body += chunk; if (body.length > 1_000_000) req.destroy(new Error('request body too large')); }); req.on('end', () => resolve(body)); req.on('error', reject); }); }
 function send(res: http.ServerResponse, status: number, value: unknown) { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(value)); }
 function protectedPath(path:string){return path.startsWith('/api/v1/runtime/')||path==='/api/v1/managed-data/provision'||path==='/api/v1/queue'||path==='/api/v1/runtime/containers'}
 async function main(req: http.IncomingMessage, res: http.ServerResponse) {
   try {
     const path=req.url?.split('?')[0]??'';
-    if (path === '/health') { send(res, 200, { ok: true, docker: await docker.ping(), queue: await queueStats() }); return; }
+    if (path === '/health') { send(res, 200, { ok: true, nodeName, docker: await docker.ping(), queue: await queueStats(nodeName) }); return; }
     if (protectedPath(path) && !verifyInternalSecret(req.headers['x-engine-secret']?.toString())) { send(res,401,{error:'Unauthorized engine request'}); return; }
-    if (path === '/api/v1/queue') { send(res, 200, await queueStats()); return; }
+    if (path === '/api/v1/queue') { send(res, 200, await queueStats(nodeName)); return; }
     if (path === '/api/v1/runtime/containers') { send(res, 200, await docker.listContainers({ all: true })); return; }
     if (path.startsWith('/api/v1/runtime/build-logs/')) { const deploymentId = decodeURIComponent(path.split('/').pop()!); send(res, 200, { deploymentId, logs: getBuildLogs(deploymentId) }); return; }
     if (path === '/api/v1/runtime/detect' && req.method === 'POST') { const body = JSON.parse(await readBody(req)); if (!body.repo) { send(res, 400, { error: 'repo is required' }); return; } send(res, 200, await detectFromGit(body)); return; }
     if (path === '/api/v1/managed-data/provision' && req.method === 'POST') {
       const body = JSON.parse(await readBody(req)) as {instanceId?:string;engine?:'postgres'|'redis';version?:string;name?:string};
       if (!body.instanceId || !['postgres','redis'].includes(body.engine||'')) { send(res,400,{error:'instanceId and engine(postgres|redis) are required'}); return; }
-      const result=await provisionManagedData({instanceId:body.instanceId,engine:body.engine!,version:body.version,name:body.name}); send(res,201,{ok:true,...result}); return;
+      const result=await provisionManagedData({instanceId:body.instanceId,engine:body.engine!,version:body.version,name:body.name}); send(res,201,{ok:true,nodeName,...result}); return;
     }
     if ((path === '/api/v1/runtime/deploy' || path === '/api/v1/runtime/rollback') && req.method === 'POST') {
       const body = JSON.parse(await readBody(req)) as DeployBody; const rollback = path.endsWith('/rollback');
@@ -37,12 +38,13 @@ async function main(req: http.IncomingMessage, res: http.ServerResponse) {
       if (body.rollbackOnFailure !== undefined && typeof body.rollbackOnFailure !== 'boolean') { send(res, 400, { error: 'rollbackOnFailure must be boolean' }); return; }
       if (body.command && (!Array.isArray(body.command) || body.command.length > 32 || body.command.some((part) => typeof part !== 'string' || part.length > 2000))) { send(res, 400, { error: 'command must be an array of up to 32 strings' }); return; }
       if (body.healthMode && !['auto', 'http', 'docker', 'process'].includes(body.healthMode)) { send(res, 400, { error: 'invalid healthMode' }); return; }
-      const idempotencyKey = req.headers['idempotency-key']?.toString(); const job = await enqueueDeployment({ operation: rollback ? 'rollback' : 'deploy', ...body }, idempotencyKey);
-      send(res, 202, { accepted: true, queued: true, jobId: job.id, deploymentId: body.deploymentId, name: body.name, replicas: body.replicas ?? 1, autoscale: body.autoscale ?? null }); return;
+      const targetNode = body.nodeName?.trim() || nodeName;
+      const idempotencyKey = req.headers['idempotency-key']?.toString(); const job = await enqueueDeployment({ operation: rollback ? 'rollback' : 'deploy', ...body, nodeName: targetNode }, idempotencyKey);
+      send(res, 202, { accepted: true, queued: true, jobId: job.id, deploymentId: body.deploymentId, name: body.name, nodeName: targetNode, replicas: body.replicas ?? 1, autoscale: body.autoscale ?? null }); return;
     }
     if (path === '/api/v1/runtime/build' && req.method === 'POST') { const body = JSON.parse(await readBody(req)); if (!body.repo || !body.image) { send(res, 400, { error: 'repo and image are required' }); return; } send(res, 200, await buildFromGit(body)); return; }
-    if (path.startsWith('/api/v1/runtime/logs/')) { const name = decodeURIComponent(path.split('/').pop()!); const logs = await docker.getContainer(name).logs({ stdout: true, stderr: true, tail: 200 }); send(res, 200, { name, logs: logs.toString() }); return; }
+    if (path.startsWith('/api/v1/runtime/logs/')) { const name = decodeURIComponent(path.split('/').pop()!); const logs = await docker.getContainer(name).logs({ stdout: true, stderr: true, tail: 200 }); send(res, 200, { name, logs: logs.toString(), nodeName }); return; }
     send(res, 404, { error: 'Not found' });
   } catch (error) { send(res, 500, { error: error instanceof Error ? error.message : String(error) }); }
 }
-http.createServer(main).listen(port, '0.0.0.0', () => console.log(`Nexus engine listening on ${port}`));
+http.createServer(main).listen(port, '0.0.0.0', () => console.log(`Nexus engine listening on ${port} as node ${nodeName}`));
