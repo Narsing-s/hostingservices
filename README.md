@@ -10,6 +10,8 @@ It takes inspiration from proven platform capabilities such as previews, deploym
 [![Production Quality Gates](https://github.com/Narsing-s/hostingservices/actions/workflows/production-quality.yml/badge.svg)](https://github.com/Narsing-s/hostingservices/actions/workflows/production-quality.yml)
 [![Local Compose Smoke](https://github.com/Narsing-s/hostingservices/actions/workflows/local-compose-smoke.yml/badge.svg)](https://github.com/Narsing-s/hostingservices/actions/workflows/local-compose-smoke.yml)
 
+> **Product truth:** Nexus is an active platform project, not a claim that every planned capability is production-ready today. A capability is production-ready only when its backend contract, UI workflow, failure path, observability, security controls, and automated tests all work together.
+
 ## Why Nexus
 
 | Platform concern | Nexus approach |
@@ -222,7 +224,15 @@ npm run dev:engine
 npm run dev
 ```
 
-If port `4000` is already occupied, stop the previous Nexus API process before starting another copy.
+For a full local platform verification:
+
+```bash
+docker compose config
+docker compose build --no-cache api web engine agent
+docker compose up -d
+```
+
+Then verify API, engine, agent and web health before using the console. If port `4000` is already occupied, stop the previous Nexus API process before starting another copy.
 
 The CLI can be linked locally with:
 
@@ -242,10 +252,26 @@ NEXT_PUBLIC_NEXUS_API_URL=https://<your-public-api-domain>
 
 Do not use `http://localhost:4000` in a production frontend. OAuth secrets remain server-side; users only select their GitHub or Google account and are redirected through the configured provider.
 
+## Production-readiness standard
+
+Nexus uses a stricter definition of done than “the page loaded”. A capability must work end-to-end across UI → API → durable state → queue/engine → runtime → routing → observability, including failure and rollback paths.
+
+See [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md) and [`docs/PLATFORM-GAP-MATRIX.md`](docs/PLATFORM-GAP-MATRIX.md) for the acceptance criteria and market capability matrix.
+
+## Community and open source
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — development and review standards
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — community expectations
+- [`SECURITY.md`](SECURITY.md) — responsible vulnerability reporting
+- [`SUPPORT.md`](SUPPORT.md) — troubleshooting and operational support
+- [`LICENSE`](LICENSE) — Apache License 2.0
+
 ## Documentation
 
 - [`docs/PRODUCTION_PLATFORM.md`](docs/PRODUCTION_PLATFORM.md) — production contract
 - [`docs/ADVANCED_PLATFORM_FEATURES.md`](docs/ADVANCED_PLATFORM_FEATURES.md) — advanced release and platform roadmap
+- [`docs/PLATFORM-GAP-MATRIX.md`](docs/PLATFORM-GAP-MATRIX.md) — product capability and competitive acceptance matrix
+- [`docs/PRODUCTION-READINESS.md`](docs/PRODUCTION-READINESS.md) — end-to-end production checklist
 - [`docs/NEXUS_YAML.md`](docs/NEXUS_YAML.md) — declarative deployment model
 
 ## Design principle
