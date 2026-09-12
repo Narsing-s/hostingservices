@@ -1,6 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { addDeploymentEvent, createRecoveryPoint, getApplicationGraph, listDeploymentEvents, listRecoveryPoints, recordAutoscalingDecision, upsertGraphEdge, upsertGraphNode } from './db.js';
+import { addDeploymentEvent, createRecoveryPoint, getApplicationGraph, getDeploymentState, listDeploymentEvents, listRecoveryPoints, listRecoverableDeployments, recordAutoscalingDecision, updateDeploymentState, upsertGraphEdge, upsertGraphNode } from './db.js';
+
+const engineSecret = () => process.env.ENGINE_CALLBACK_SECRET ?? '';
+function validEngineCallback(req: any) {
+  const configured = engineSecret();
+  if (!configured) return process.env.NODE_ENV !== 'production';
+  return req.headers['x-engine-secret']?.toString() === configured;
+}
 
 export async function registerProductionPlatformRoutes(app: FastifyInstance) {
   app.get('/api/v1/deployments/:id/events', async (req, reply) => {
@@ -13,6 +20,11 @@ export async function registerProductionPlatformRoutes(app: FastifyInstance) {
     const body = z.object({ phase: z.string().min(1).max(64), message: z.string().min(1).max(2000), metadata: z.record(z.string(), z.unknown()).optional() }).parse(req.body);
     await addDeploymentEvent(id, body.phase, body.message, body.metadata ?? {});
     return reply.code(201).send({ ok: true });
+  });
+
+  app.get('/api/v1/deployments/:id/state', async req => {
+    const id = String((req.params as { id: string }).id);
+    return { deploymentId: id, state: await getDeploymentState(id) };
   });
 
   app.get('/api/v1/projects/:projectId/recovery-points', async req => {
@@ -49,5 +61,32 @@ export async function registerProductionPlatformRoutes(app: FastifyInstance) {
     const body = z.object({ currentReplicas: z.number().int().min(0), desiredReplicas: z.number().int().min(0), reason: z.string().min(1).max(500), metrics: z.record(z.string(), z.unknown()).optional() }).parse(req.body);
     await recordAutoscalingDecision({ serviceId, ...body });
     return reply.code(201).send({ ok: true, serviceId, ...body });
+  });
+
+  // Engine-only lifecycle callback. It deliberately lives outside /api/v1 so the
+  // user authentication hook cannot block trusted node callbacks.
+  app.post('/api/internal/deployments/:id/state', async (req, reply) => {
+    if (!validEngineCallback(req)) return reply.code(401).send({ error: 'Unauthorized engine callback' });
+    const id = String((req.params as { id: string }).id);
+    const body = z.object({
+      phase: z.string().min(1).max(64),
+      attempt: z.number().int().min(0).optional(),
+      strategy: z.enum(['rolling', 'blue_green', 'canary']).optional(),
+      generationId: z.string().max(160).optional(),
+      desiredGenerationId: z.string().max(160).optional(),
+      previousGenerationId: z.string().max(160).optional(),
+      error: z.string().max(4000).nullable().optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+      finished: z.boolean().optional(),
+    }).parse(req.body);
+    await updateDeploymentState(id, body);
+    return { ok: true, deploymentId: id, phase: body.phase };
+  });
+
+  // Used by engine startup/recovery tooling to discover work whose durable state
+  // says it was active when a node or process disappeared.
+  app.get('/api/internal/deployments/recoverable', async (req, reply) => {
+    if (!validEngineCallback(req)) return reply.code(401).send({ error: 'Unauthorized engine callback' });
+    return { deployments: await listRecoverableDeployments() };
   });
 }
