@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/production-hosting-platform]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:

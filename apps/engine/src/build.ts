@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile, readFile, access, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { buildSandboxPolicy, dockerBuildArgs } from './sandbox.js';
 
 export type BuildRequest = { repo: string; ref?: string; image: string; deploymentId?: string; service?: string };
 export type DetectRequest = { repo: string; ref?: string; service?: string };
@@ -139,10 +140,17 @@ export async function buildFromGit(request: BuildRequest) {
     const serviceSuffix = detected.service ? ` [service=${detected.service}]` : '';
     appendLog(request.deploymentId, `✓ Runtime detected: ${detected.kind}${detected.generated ? ' (Dockerfile generated)' : ''}${serviceSuffix}\n`);
     if (detected.availableServices && detected.availableServices.length > 1) appendLog(request.deploymentId, `  Available services: ${detected.availableServices.join(', ')}\n`);
-    appendLog(request.deploymentId, `\n$ docker build --pull -f ${detected.dockerfilePath} -t ${request.image} ${detected.contextDir}\n`);
-    await run('docker', ['build', '--pull', '-f', detected.dockerfilePath, '-t', request.image, detected.contextDir], { timeout: 900000, deploymentId: request.deploymentId });
-    appendLog(request.deploymentId, `\n✓ Build completed: ${request.image}\n`);
-    return { image: request.image, repository: request.repo, ref: request.ref ?? 'default', status: 'built', runtime: detected.kind, dockerfileGenerated: detected.generated, service: detected.service, availableServices: detected.availableServices };
+
+    const sandbox = buildSandboxPolicy();
+    const buildArgs = dockerBuildArgs(sandbox, detected.dockerfilePath, request.image, detected.contextDir);
+    appendLog(request.deploymentId, `\n$ docker ${buildArgs.join(' ')}\n`);
+    appendLog(request.deploymentId, `  Build sandbox: network=${sandbox.network}, memory=${sandbox.memory}, cpus=${sandbox.cpus}, pids=${sandbox.pids}, timeout=${sandbox.timeoutMs}ms, no-new-privileges=${sandbox.noNewPrivileges}, cap-drop=ALL\n`);
+    await run('docker', buildArgs, { timeout: sandbox.timeoutMs, deploymentId: request.deploymentId });
+
+    appendLog(request.deploymentId, `\n$ docker image inspect ${request.image}\n`);
+    await run('docker', ['image', 'inspect', request.image], { timeout: 30000, deploymentId: request.deploymentId });
+    appendLog(request.deploymentId, `\n✓ Build completed and image verified: ${request.image}\n`);
+    return { image: request.image, repository: request.repo, ref: request.ref ?? 'default', status: 'built', runtime: detected.kind, dockerfileGenerated: detected.generated, service: detected.service, availableServices: detected.availableServices, sandbox: { network: sandbox.network, memory: sandbox.memory, cpus: sandbox.cpus, pids: sandbox.pids, timeoutMs: sandbox.timeoutMs } };
   } catch (error) {
     appendLog(request.deploymentId, `\n✗ BUILD FAILED: ${error instanceof Error ? error.message : String(error)}\n`);
     throw error;

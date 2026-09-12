@@ -1,110 +1,36 @@
 import pg from 'pg';
 const { Pool } = pg;
 
-/**
- * Compatibility bootstrap for existing installations. New production installs
- * should eventually move these statements into the migration system.
- */
+/** Compatibility bootstrap. New installs should move these statements into versioned migrations. */
 export async function ensurePlatformSchema() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL ?? 'postgres://nexus:nexus_dev_only@127.0.0.1:5432/nexus' });
   try {
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS organizations (
-        id uuid PRIMARY KEY,
-        name text NOT NULL,
-        slug text NOT NULL UNIQUE,
-        created_at timestamptz NOT NULL DEFAULT now()
-      );
-      CREATE TABLE IF NOT EXISTS organization_members (
-        organization_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        role text NOT NULL CHECK (role IN ('owner','admin','developer','viewer')),
-        created_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (organization_id,user_id)
-      );
+      CREATE TABLE IF NOT EXISTS organizations (id uuid PRIMARY KEY,name text NOT NULL,slug text NOT NULL UNIQUE,created_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE IF NOT EXISTS organization_members (organization_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,role text NOT NULL CHECK (role IN ('owner','admin','developer','viewer')),created_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY (organization_id,user_id));
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE;
       CREATE INDEX IF NOT EXISTS projects_organization_idx ON projects(organization_id,created_at DESC);
-      CREATE TABLE IF NOT EXISTS environments (
-        id uuid PRIMARY KEY,
-        project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        name text NOT NULL,
-        slug text NOT NULL,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        UNIQUE(project_id,slug)
-      );
-      CREATE TABLE IF NOT EXISTS services (
-        id uuid PRIMARY KEY,
-        environment_id uuid NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
-        name text NOT NULL,
-        type text NOT NULL CHECK (type IN ('web','worker','cron','private','database','redis')),
-        source jsonb NOT NULL DEFAULT '{}'::jsonb,
-        config jsonb NOT NULL DEFAULT '{}'::jsonb,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        UNIQUE(environment_id,name)
-      );
-      CREATE TABLE IF NOT EXISTS secrets (
-        id uuid PRIMARY KEY,
-        environment_id uuid NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
-        service_id uuid REFERENCES services(id) ON DELETE CASCADE,
-        name text NOT NULL,
-        encrypted_value text NOT NULL,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        updated_at timestamptz NOT NULL DEFAULT now()
-      );
+      CREATE TABLE IF NOT EXISTS environments (id uuid PRIMARY KEY,project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,name text NOT NULL,slug text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(project_id,slug));
+      CREATE TABLE IF NOT EXISTS services (id uuid PRIMARY KEY,environment_id uuid NOT NULL REFERENCES environments(id) ON DELETE CASCADE,name text NOT NULL,type text NOT NULL CHECK (type IN ('web','worker','cron','private','database','redis')),source jsonb NOT NULL DEFAULT '{}'::jsonb,config jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(environment_id,name));
+      CREATE TABLE IF NOT EXISTS secrets (id uuid PRIMARY KEY,environment_id uuid NOT NULL REFERENCES environments(id) ON DELETE CASCADE,service_id uuid REFERENCES services(id) ON DELETE CASCADE,name text NOT NULL,encrypted_value text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now());
       ALTER TABLE secrets DROP CONSTRAINT IF EXISTS secrets_environment_id_service_id_name_key;
       CREATE UNIQUE INDEX IF NOT EXISTS secrets_environment_name_global_idx ON secrets(environment_id,name) WHERE service_id IS NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS secrets_environment_service_name_idx ON secrets(environment_id,service_id,name) WHERE service_id IS NOT NULL;
-      CREATE TABLE IF NOT EXISTS api_tokens (
-        id uuid PRIMARY KEY,
-        user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        name text NOT NULL,
-        token_hash text NOT NULL UNIQUE,
-        scopes jsonb NOT NULL DEFAULT '[]'::jsonb,
-        expires_at timestamptz,
-        created_at timestamptz NOT NULL DEFAULT now(),
-        last_used_at timestamptz
-      );
-      CREATE TABLE IF NOT EXISTS audit_logs (
-        id uuid PRIMARY KEY,
-        organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,
-        user_id uuid REFERENCES users(id) ON DELETE SET NULL,
-        action text NOT NULL,
-        resource_type text NOT NULL,
-        resource_id text,
-        metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-        created_at timestamptz NOT NULL DEFAULT now()
-      );
+      CREATE TABLE IF NOT EXISTS api_tokens (id uuid PRIMARY KEY,user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,name text NOT NULL,token_hash text NOT NULL UNIQUE,scopes jsonb NOT NULL DEFAULT '[]'::jsonb,expires_at timestamptz,created_at timestamptz NOT NULL DEFAULT now(),last_used_at timestamptz);
+      CREATE TABLE IF NOT EXISTS audit_logs (id uuid PRIMARY KEY,organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,user_id uuid REFERENCES users(id) ON DELETE SET NULL,action text NOT NULL,resource_type text NOT NULL,resource_id text,metadata jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now());
       CREATE INDEX IF NOT EXISTS audit_logs_org_created_idx ON audit_logs(organization_id,created_at DESC);
-      CREATE TABLE IF NOT EXISTS usage_events (
-        id uuid PRIMARY KEY,
-        organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,
-        project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
-        service_id uuid REFERENCES services(id) ON DELETE CASCADE,
-        metric text NOT NULL,
-        quantity numeric NOT NULL,
-        unit text NOT NULL,
-        recorded_at timestamptz NOT NULL DEFAULT now()
-      );
+      CREATE TABLE IF NOT EXISTS usage_events (id uuid PRIMARY KEY,organization_id uuid REFERENCES organizations(id) ON DELETE CASCADE,project_id uuid REFERENCES projects(id) ON DELETE CASCADE,service_id uuid REFERENCES services(id) ON DELETE CASCADE,metric text NOT NULL,quantity numeric NOT NULL CHECK(quantity >= 0),unit text NOT NULL,recorded_at timestamptz NOT NULL DEFAULT now());
       CREATE INDEX IF NOT EXISTS usage_events_org_recorded_idx ON usage_events(organization_id,recorded_at DESC);
-      CREATE TABLE IF NOT EXISTS volumes (
-        id uuid PRIMARY KEY,
-        service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-        name text NOT NULL,
-        size_bytes bigint NOT NULL,
-        mount_path text NOT NULL,
-        provider text NOT NULL DEFAULT 'docker',
-        created_at timestamptz NOT NULL DEFAULT now(),
-        UNIQUE(service_id,name)
-      );
-      CREATE TABLE IF NOT EXISTS database_instances (
-        id uuid PRIMARY KEY,
-        service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-        engine text NOT NULL CHECK (engine IN ('postgres','redis')),
-        version text,
-        connection_uri_secret_id uuid REFERENCES secrets(id) ON DELETE SET NULL,
-        status text NOT NULL DEFAULT 'provisioning',
-        created_at timestamptz NOT NULL DEFAULT now()
-      );
+      CREATE TABLE IF NOT EXISTS volumes (id uuid PRIMARY KEY,service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,name text NOT NULL,size_bytes bigint NOT NULL CHECK(size_bytes > 0),mount_path text NOT NULL,provider text NOT NULL DEFAULT 'docker',created_at timestamptz NOT NULL DEFAULT now(),UNIQUE(service_id,name));
+      CREATE TABLE IF NOT EXISTS database_instances (id uuid PRIMARY KEY,service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,engine text NOT NULL CHECK (engine IN ('postgres','redis')),version text,status text NOT NULL DEFAULT 'provisioning',created_at timestamptz NOT NULL DEFAULT now());
+      ALTER TABLE database_instances ADD COLUMN IF NOT EXISTS connection_uri_secret_id uuid REFERENCES secrets(id) ON DELETE SET NULL;
+      ALTER TABLE database_instances ADD COLUMN IF NOT EXISTS endpoint text;
+      ALTER TABLE database_instances ADD COLUMN IF NOT EXISTS container_name text;
+      ALTER TABLE database_instances ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+      CREATE TABLE IF NOT EXISTS runtime_nodes (id uuid PRIMARY KEY,name text NOT NULL UNIQUE,endpoint text NOT NULL,region text NOT NULL DEFAULT 'local',capacity_cpu_millis integer NOT NULL DEFAULT 1000 CHECK(capacity_cpu_millis > 0),capacity_memory_bytes bigint NOT NULL DEFAULT 1073741824 CHECK(capacity_memory_bytes > 0),used_cpu_millis integer NOT NULL DEFAULT 0 CHECK(used_cpu_millis >= 0),used_memory_bytes bigint NOT NULL DEFAULT 0 CHECK(used_memory_bytes >= 0),status text NOT NULL DEFAULT 'online' CHECK(status IN ('online','draining','offline')),last_heartbeat_at timestamptz NOT NULL DEFAULT now(),created_at timestamptz NOT NULL DEFAULT now());
+      CREATE INDEX IF NOT EXISTS runtime_nodes_heartbeat_idx ON runtime_nodes(status,last_heartbeat_at DESC);
+      CREATE TABLE IF NOT EXISTS cron_jobs (id uuid PRIMARY KEY,service_id uuid NOT NULL REFERENCES services(id) ON DELETE CASCADE,schedule text NOT NULL,command jsonb NOT NULL DEFAULT '[]'::jsonb,timezone text NOT NULL DEFAULT 'UTC',enabled boolean NOT NULL DEFAULT true,last_run_at timestamptz,next_run_at timestamptz,created_at timestamptz NOT NULL DEFAULT now());
+      CREATE INDEX IF NOT EXISTS cron_jobs_due_idx ON cron_jobs(enabled,next_run_at);
     `);
   } finally { await pool.end(); }
 }
