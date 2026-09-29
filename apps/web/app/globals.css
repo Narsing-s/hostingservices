@@ -3,3 +3,30 @@
 :root{color-scheme:dark}a{color:inherit}button{appearance:none;-webkit-tap-highlight-color:transparent}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #8aa4bf;outline-offset:2px}.sideLinks{display:grid;gap:4px;margin:18px 0 14px}.sideLinks a{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid transparent;border-radius:9px;color:#7f8996;text-decoration:none;font-size:11px;transition:.18s ease}.sideLinks a:hover{color:#fff;background:#111720;border-color:#202b36}.mobileBar{display:none}.service{width:100%;text-align:left;color:inherit;font:inherit;cursor:pointer;min-width:0}.serviceAction{display:flex;align-items:center;gap:4px;color:#aeb9c5}.service:focus-visible{outline:2px solid #8aa4bf;outline-offset:3px}.service:hover .serviceAction{color:#fff}.row button{white-space:nowrap}.row>span{min-width:0}.row>div small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.panel{min-width:0;overflow:hidden}.table{width:100%;overflow-x:auto}.table .row{min-width:680px}.toast{max-width:min(520px,calc(100vw - 32px))}.modalBackdrop{backdrop-filter:blur(7px)}.deployModal input,.deployModal select,.authCard input,.wideSelect{min-height:42px}.deployAction{min-height:44px}.mini:hover,.termButton:hover{border-color:#526170;background:#18212b;color:#fff}.ghost:hover{color:#fff}.heroCard,.insight,.service,.terminal,.panel{box-shadow:0 10px 30px rgba(0,0,0,.12)}
 @media(max-width:1000px){.mobileBar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px;padding:10px 0;border-bottom:1px solid #1b222c}.mobileBrand{display:flex;align-items:center;gap:9px;text-decoration:none}.mobileBrand .logo{width:30px;height:30px}.mobileBrand b{font-size:12px;letter-spacing:.14em}.mobileActions{display:flex;align-items:center;gap:6px}.mobileActions a,.mobileActions button{display:flex;align-items:center;gap:5px;border:1px solid #27313d;background:#10161e;color:#cbd3dc;border-radius:8px;padding:8px 9px;text-decoration:none;font-size:10px}.mobileActions button{background:#eef2f5;color:#080b0f;font-weight:750}.content{max-width:none}.heroGrid{margin-top:22px}}
 @media(max-width:600px){.mobileActions a{display:none}.mobileActions button{padding:9px 11px}.sectionHead{margin-top:34px}.heroCard,.insight,.service,.terminal,.panel{border-radius:13px}.heroCard,.insight,.panel{padding:16px}.heroCard .metric{margin:20px 0}.graph{padding-bottom:2px}.node{min-width:100px;padding:11px}.line{min-width:18px}.panelHead h2{font-size:20px}.panelHead{margin-bottom:14px}.row{min-width:0!important;grid-template-columns:minmax(0,1fr) auto!important;gap:10px}.row>span{display:none}.row>div{min-width:0}.row .mini{justify-self:end}.row .state{justify-self:end}.toast{left:16px;right:16px;top:12px}.deployModal,.logsPanel{padding:16px;border-radius:13px}.modalHead{margin-bottom:17px}.modalHead h2{font-size:19px}.formGrid{gap:0}.services{gap:9px}}
+
+
+/* Compact console redesign: reduce whitespace and keep controls close to their data. */
+:root{--nx-bg:#080b10;--nx-panel:#0e141b;--nx-border:#202b36;--nx-muted:#82909e}
+main{background:var(--nx-bg)}
+aside{width:220px;padding:20px 13px;background:#090d12}
+.brand{padding:4px 9px 24px}
+.content{margin-left:220px;width:calc(100% - 220px);max-width:none;padding:30px clamp(22px,3vw,48px) 54px}
+.content>header{align-items:center;padding-bottom:20px;border-bottom:1px solid #1b2530}
+h1{font-size:clamp(28px,2.8vw,38px);max-width:680px;margin:8px 0 9px}
+header p{font-size:12px;max-width:650px}
+.heroGrid{grid-template-columns:minmax(0,1.35fr) minmax(260px,.8fr);gap:12px;margin-top:22px}
+.heroCard,.insight{padding:18px;border-radius:13px}
+.metric{margin:17px 0}.metric strong{font-size:36px}
+.node{min-width:105px;padding:10px;border-radius:9px}.node small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:125px}
+.sectionHead{margin:28px 0 12px}.sectionHead h2{font-size:19px}
+.services{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.service{padding:14px;border-radius:12px}.service h3{margin:12px 0 5px}.service p{min-height:34px;margin:0 0 12px}
+.terminal{margin-top:14px;padding:13px;border-radius:12px}.terminal>div:not(.termHead){padding:3px 0}
+.panel{margin-top:22px;padding:18px;border-radius:13px}.panelHead{margin-bottom:12px}.panelHead h2{font-size:20px}
+.table{border-radius:10px}.row{min-height:56px;padding:9px 12px;grid-template-columns:minmax(0,1fr) auto auto auto;gap:12px}
+.row b{font-size:11px}.row small,.row>span{font-size:9px}
+.mini{padding:6px 9px}
+.sideLinks{margin:12px 0}.sideCard{padding:11px}
+@media(max-width:1100px){.content{padding:24px}.services{grid-template-columns:repeat(2,minmax(0,1fr))}.heroGrid{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){.content{padding:18px 14px 40px}.content>header{display:block}.content>header>button{margin-top:14px}.heroGrid{grid-template-columns:1fr}.services{grid-template-columns:1fr 1fr}.panel{padding:14px}.table .row{min-width:0;grid-template-columns:minmax(0,1fr) auto!important}.row>span{display:none}}
+@media(max-width:480px){.services{grid-template-columns:1fr}.mobileBar{margin-bottom:16px}.heroCard,.insight{padding:14px}.graph{max-width:100%}.node{min-width:92px}.node small{max-width:90px}}
